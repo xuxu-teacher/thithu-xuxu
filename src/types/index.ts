@@ -1,0 +1,85 @@
+export type QuestionPart = 'mcq' | 'true_false' | 'short_answer'
+export type ScoringMethod = 'equal_split' | 'ministry_partial'
+export type AttemptStatus = 'in_progress' | 'submitted' | 'missed' | 'disqualified'
+
+export interface MCQOption {
+  key: string // 'A' | 'B' | 'C' | 'D'
+  html: string
+}
+
+export interface TrueFalseOption {
+  key: string // 'a' | 'b' | 'c' | 'd'
+  html: string
+  correct: boolean
+}
+
+export interface Question {
+  id: string
+  exam_id: string
+  order_index: number
+  part: QuestionPart
+  content_html: string
+  image_url?: string | null
+  options: MCQOption[] | TrueFalseOption[] | null
+  correct_answer?: string | null // mcq / short_answer
+  explanation_html?: string | null
+  points: number
+}
+
+export interface Exam {
+  id: string
+  teacher_id: string
+  class_id: string
+  title: string
+  wave_number: number
+  duration_minutes: number
+  open_at: string
+  close_at: string
+  scoring_method: ScoringMethod
+  requires_previous_wave: boolean
+}
+
+export interface ClassRoom {
+  id: string
+  teacher_id: string
+  class_code: string
+  class_name: string
+}
+
+export interface Student {
+  id: string
+  class_id: string
+  student_code: string
+  full_name: string
+}
+
+export interface Attempt {
+  id: string
+  exam_id: string
+  student_id: string
+  status: AttemptStatus
+  started_at: string | null
+  submitted_at: string | null
+  answers: Record<string, StudentAnswer>
+  score: number | null
+}
+
+// Đáp án học sinh chọn cho 1 câu:
+// mcq: "A"
+// true_false: { a: true, b: false, c: true, d: true }
+// short_answer: "chuỗi trả lời"
+export type StudentAnswer = string | Record<string, boolean>
+
+export interface TeacherSession {
+  id: string
+  full_name: string
+  email: string
+}
+
+export interface StudentSession {
+  id: string
+  class_id: string
+  full_name: string
+  student_code: string
+  class_code: string
+}
