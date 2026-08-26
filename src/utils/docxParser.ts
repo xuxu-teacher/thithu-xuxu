@@ -35,8 +35,11 @@ import { MCQOption, ParsedImage, QuestionPart, TrueFalseOption } from '../types'
 // ============================================================
 // CẤU HÌNH MÁY CHỦ MATHTYPE (tùy chọn)
 // ============================================================
-const MATHTYPE_SERVER_URL: string =
-  (import.meta as any)?.env?.VITE_MATHTYPE_SERVER_URL || ''
+// QUAN TRỌNG: phải viết đúng "import.meta.env.VITE_..." — KHÔNG dùng "?."
+// (optional chaining) ở đây. Vite chỉ thay giá trị thật vào lúc build khi
+// gặp đúng cú pháp này; viết kiểu (import.meta as any)?.env?.KEY sẽ luôn ra
+// rỗng dù biến môi trường đã cấu hình đúng trên Vercel.
+const MATHTYPE_SERVER_URL: string = import.meta.env.VITE_MATHTYPE_SERVER_URL || ''
 
 export interface DraftQuestionData {
   key: string
