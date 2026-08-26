@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabaseClient'
 import { ClassRoom, Exam, Student } from '../types'
+import ClassOverallStats from '../components/ClassOverallStats'
 
 function randomCode(prefix: string) {
   return prefix + Math.random().toString(36).slice(2, 7).toUpperCase()
@@ -143,10 +144,21 @@ export default function TeacherClassDetail() {
     }
   }
 
+  async function handleDeleteStudent(studentId: string, name: string) {
+    if (!window.confirm(`Xóa học sinh "${name}" khỏi lớp? Toàn bộ kết quả thi của em này cũng sẽ bị xóa theo. Hành động không thể hoàn tác.`)) return
+    const { error } = await supabase.from('students').delete().eq('id', studentId)
+    if (error) { alert('Lỗi khi xóa: ' + error.message); return }
+    loadAll()
+  }
+
   if (!classRoom) return <div className="container">Đang tải...</div>
 
   return (
     <div className="container">
+      <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
+        ← Trang chủ giáo viên
+      </Link>
+
       <div className="card">
         <h2>
           Lớp {classRoom.class_name} — <span className="badge">{classRoom.class_code}</span>
@@ -194,6 +206,7 @@ export default function TeacherClassDetail() {
             <tr>
               <th>Mã học sinh</th>
               <th>Họ và tên</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -201,17 +214,27 @@ export default function TeacherClassDetail() {
               <tr key={s.id}>
                 <td>{s.student_code}</td>
                 <td>{s.full_name}</td>
+                <td>
+                  <button className="btn danger" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => handleDeleteStudent(s.id, s.full_name)}>
+                    Xóa
+                  </button>
+                </td>
               </tr>
             ))}
             {students.length === 0 && (
               <tr>
-                <td colSpan={2} style={{ color: 'var(--muted)' }}>
+                <td colSpan={3} style={{ color: 'var(--muted)' }}>
                   Chưa có học sinh nào.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="card">
+        <h3>📈 Thống kê tổng hợp của lớp (qua tất cả các đợt thi)</h3>
+        <ClassOverallStats classId={classId!} students={students} />
       </div>
 
       <div className="card">

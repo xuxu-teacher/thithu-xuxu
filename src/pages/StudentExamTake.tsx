@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import { Question, ScoringMethod, StudentAnswer, TrueFalseOption, MCQOption } from '../types'
-import { scoreExam } from '../utils/scoring'
+import { Question, StudentAnswer, TrueFalseOption, MCQOption } from '../types'
 import MathRenderer from '../components/MathRenderer'
 
 export default function StudentExamTake() {
@@ -13,11 +12,12 @@ export default function StudentExamTake() {
 
   const [questions, setQuestions] = useState<Question[]>([])
   const [answers, setAnswers] = useState<Record<string, StudentAnswer>>({})
-  const [scoringMethod, setScoringMethod] = useState<ScoringMethod>('ministry_partial')
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [tabSwitchCount, setTabSwitchCount] = useState(0)
   const submittedRef = useRef(false)
+  const tabSwitchRef = useRef(0)
 
   useEffect(() => {
     async function init() {
@@ -42,7 +42,6 @@ export default function StudentExamTake() {
         .rpc('get_my_attempt', { p_exam_id: examId, p_student_id: student!.id })
         .single()
 
-      setScoringMethod(((examInfo as any)?.scoring_method as ScoringMethod) || 'ministry_partial')
       setQuestions((qs as Question[]) || [])
       setAnswers(((attempt as any)?.answers as Record<string, StudentAnswer>) || {})
 
@@ -53,6 +52,26 @@ export default function StudentExamTake() {
       setLoading(false)
     }
     init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId])
+
+  // Phát hiện dấu hiệu gian lận: đếm số lần học sinh rời khỏi tab/thu nhỏ
+  // cửa sổ trong lúc làm bài (mở tài liệu, tra Google ở tab khác...). Ghi
+  // nhận ngay lập tức lên server để không mất dữ liệu nếu đóng trình duyệt.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.hidden && !submittedRef.current) {
+        tabSwitchRef.current += 1
+        setTabSwitchCount(tabSwitchRef.current)
+        supabase.rpc('report_tab_switch', {
+          p_exam_id: examId,
+          p_student_id: student!.id,
+          p_count: tabSwitchRef.current,
+        })
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId])
 
@@ -74,12 +93,15 @@ export default function StudentExamTake() {
   async function handleSubmit() {
     if (submittedRef.current) return
     submittedRef.current = true
-    const { total } = scoreExam(questions, answers, scoringMethod)
+    // QUAN TRỌNG: điểm được tính TẠI SERVER (hàm submit_attempt trong Supabase)
+    // dựa trên đáp án thật trong bảng questions — KHÔNG tự chấm ở client, vì
+    // trong lúc làm bài client chỉ nhận đề đã ẩn đáp án (chống lộ đề qua
+    // devtools), nên client không có đủ dữ liệu để tự chấm chính xác.
     await supabase.rpc('submit_attempt', {
       p_exam_id: examId,
       p_student_id: student!.id,
       p_answers: answers,
-      p_score: total,
+      p_tab_switch_count: tabSwitchRef.current,
     })
     navigate(`/student/exams/${examId}/result`)
   }
@@ -96,16 +118,23 @@ export default function StudentExamTake() {
 
   const mm = Math.floor((secondsLeft || 0) / 60)
   const ss = (secondsLeft || 0) % 60
+  const isUrgent = (secondsLeft || 0) < 300
 
   return (
     <div className="container">
       <div className="card" style={{ position: 'sticky', top: 0, zIndex: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <b>Đang làm bài</b>
-          <span className="timer">
+          <span className={`timer ${isUrgent ? 'urgent' : ''}`}>
             ⏱ {mm.toString().padStart(2, '0')}:{ss.toString().padStart(2, '0')}
           </span>
         </div>
+        {tabSwitchCount > 0 && (
+          <p style={{ fontSize: 12.5, color: 'var(--danger)', margin: '6px 0 0' }}>
+            ⚠ Hệ thống ghi nhận bạn đã rời khỏi màn hình làm bài {tabSwitchCount} lần. Vui lòng ở lại đúng
+            trang này cho đến khi nộp bài.
+          </p>
+        )}
       </div>
 
       {questions.map((q, idx) => (

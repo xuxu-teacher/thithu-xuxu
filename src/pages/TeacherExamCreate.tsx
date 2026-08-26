@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { v4 as uuid } from 'uuid'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
@@ -33,6 +33,7 @@ export default function TeacherExamCreate() {
   const [parseNotice, setParseNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [previewMode, setPreviewMode] = useState(false)
 
   async function handleUploadWord(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -150,6 +151,69 @@ export default function TeacherExamCreate() {
 
   return (
     <div className="container">
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Link to="/teacher/dashboard" className="btn secondary">← Trang chủ giáo viên</Link>
+        {questions.length > 0 && (
+          <button type="button" className="btn accent" onClick={() => setPreviewMode((v) => !v)}>
+            {previewMode ? '✏️ Quay lại chỉnh sửa' : '👁 Xem trước toàn bộ đề'}
+          </button>
+        )}
+      </div>
+
+      {previewMode ? (
+        <div className="card">
+          <h2>Xem trước toàn bộ đề — kiểm tra công thức có hiển thị đúng không</h2>
+          <p style={{ fontSize: 12.5 }}>
+            Đây là cách đề sẽ hiển thị cho học sinh. Rà từng câu xem công thức toán, hình ảnh có đúng không trước
+            khi lưu. Câu nào có nhãn "⚠ Cần rà lại" bên dưới thì đặc biệt lưu ý.
+          </p>
+          {questions.map((q, idx) => (
+            <div className="question-block" key={q.key}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <b>Câu {idx + 1}</b>
+                <span>
+                  <span className="badge" style={{ marginRight: 6 }}>{q.points} điểm</span>
+                  {q.needsReview && <span className="badge warn">⚠ Cần rà lại</span>}
+                </span>
+              </div>
+              <MathRenderer html={q.content_html} block />
+              {q.part === 'mcq' && (
+                <div>
+                  {(q.options as MCQOption[]).map((opt) => (
+                    <div className="tf-row" key={opt.key}>
+                      <b style={{ color: opt.key === q.correct_answer ? 'var(--success)' : undefined }}>{opt.key}.</b>
+                      <MathRenderer html={opt.html} />
+                      {opt.key === q.correct_answer && <span className="badge correct" style={{ marginLeft: 'auto' }}>Đáp án đúng</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {q.part === 'true_false' && (
+                <div>
+                  {(q.options as TrueFalseOption[]).map((opt) => (
+                    <div className="tf-row" key={opt.key}>
+                      <b>{opt.key})</b>
+                      <MathRenderer html={opt.html} />
+                      <span className={`badge ${opt.correct ? 'correct' : 'wrong'}`} style={{ marginLeft: 'auto' }}>
+                        {opt.correct ? 'Đúng' : 'Sai'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {q.part === 'short_answer' && (
+                <p>Đáp án đúng: <b>{q.correct_answer || '(chưa nhập)'}</b></p>
+              )}
+              {q.explanation_html && (
+                <div className="explanation">
+                  <b>Lời giải:</b>
+                  <MathRenderer html={q.explanation_html} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
       <form onSubmit={handleSave}>
         <div className="card">
           <h2>1. Thiết lập đợt thi</h2>
@@ -321,6 +385,7 @@ export default function TeacherExamCreate() {
           {saving ? 'Đang lưu...' : 'Lưu đề thi'}
         </button>
       </form>
+      )}
     </div>
   )
 }

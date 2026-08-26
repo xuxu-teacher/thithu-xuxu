@@ -45,6 +45,10 @@ export default function TeacherAllExams() {
 
   return (
     <div className="container">
+      <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
+        ← Trang chủ giáo viên
+      </Link>
+
       <div className="card">
         <h2>📚 Ngân hàng đề thi</h2>
         <p style={{ fontSize: 13 }}>

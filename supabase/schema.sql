@@ -200,24 +200,82 @@ create policy teacher_own_attempts on attempts for select using (
 -- tránh lộ dữ liệu. Xem thư mục supabase/functions/ (đề xuất) hoặc dùng RPC
 -- security definer tương tự can_take_exam ở trên cho các thao tác của học sinh.
 
--- RPC: học sinh nộp bài (security definer, bỏ qua RLS, tự kiểm tra hợp lệ)
--- p_score được tính sẵn ở client bằng utils/scoring.ts (đồng bộ với scoring_method
--- của đề) và gửi kèm để lưu lại, tránh phải viết lại toàn bộ engine chấm điểm bằng SQL.
+-- Cột đếm số lần học sinh rời khỏi tab/thu nhỏ cửa sổ trong lúc làm bài —
+-- dùng để cảnh báo giáo viên về dấu hiệu gian lận (mở tài liệu/tra cứu ở tab khác).
+alter table attempts add column if not exists tab_switch_count int not null default 0;
+
+-- RPC: học sinh nộp bài — CHẤM ĐIỂM NGAY TẠI SERVER bằng đáp án thật trong
+-- bảng questions (không dùng điểm tính sẵn từ client), vì trong lúc làm bài
+-- client chỉ nhận được đề đã ẩn đáp án (xem get_exam_questions), nên client
+-- không thể tự chấm chính xác — và cũng không nên tin điểm do client gửi lên
+-- vì có thể bị sửa qua devtools. Hỗ trợ cả 2 cách tính điểm câu Đúng/Sai.
 create or replace function submit_attempt(
-  p_exam_id uuid, p_student_id uuid, p_answers jsonb, p_score numeric
+  p_exam_id uuid, p_student_id uuid, p_answers jsonb, p_tab_switch_count int default 0
 ) returns numeric language plpgsql security definer as $$
+declare
+  v_scoring_method text;
+  v_total numeric := 0;
+  q record;
+  v_ans jsonb;
+  v_correct_count int;
+  v_total_subs int;
+  v_ratio numeric;
 begin
+  select scoring_method into v_scoring_method from exams where id = p_exam_id;
+
+  for q in select * from questions where exam_id = p_exam_id loop
+    v_ans := p_answers -> q.id::text;
+
+    if q.part = 'mcq' then
+      if v_ans is not null and (v_ans #>> '{}') = q.correct_answer then
+        v_total := v_total + q.points;
+      end if;
+
+    elsif q.part = 'short_answer' then
+      if v_ans is not null and lower(trim(both from (v_ans #>> '{}'))) = lower(trim(both from coalesce(q.correct_answer, ''))) then
+        v_total := v_total + q.points;
+      end if;
+
+    elsif q.part = 'true_false' then
+      select count(*) into v_total_subs from jsonb_array_elements(q.options);
+      select count(*) into v_correct_count
+        from jsonb_array_elements(q.options) opt
+        where (v_ans ->> (opt->>'key'))::boolean is not distinct from (opt->>'correct')::boolean
+          and (v_ans ->> (opt->>'key')) is not null;
+
+      if v_scoring_method = 'equal_split' then
+        v_ratio := v_correct_count::numeric / greatest(v_total_subs, 1);
+      else
+        v_ratio := case v_correct_count
+          when 0 then 0 when 1 then 0.1 when 2 then 0.25 when 3 then 0.5 else 1.0
+        end;
+      end if;
+      v_total := v_total + q.points * v_ratio;
+    end if;
+  end loop;
+
+  v_total := round(v_total, 2);
+
   update attempts
-    set answers = p_answers, status = 'submitted', submitted_at = now(), score = p_score
+    set answers = p_answers, status = 'submitted', submitted_at = now(),
+        score = v_total, tab_switch_count = greatest(tab_switch_count, p_tab_switch_count)
     where exam_id = p_exam_id and student_id = p_student_id;
 
   if not found then
-    insert into attempts (exam_id, student_id, answers, status, started_at, submitted_at, score)
-    values (p_exam_id, p_student_id, p_answers, 'submitted', now(), now(), p_score);
+    insert into attempts (exam_id, student_id, answers, status, started_at, submitted_at, score, tab_switch_count)
+    values (p_exam_id, p_student_id, p_answers, 'submitted', now(), now(), v_total, p_tab_switch_count);
   end if;
 
-  return p_score;
+  return v_total;
 end;
+$$;
+
+-- RPC: ghi nhận số lần chuyển tab ngay trong lúc làm bài (gọi định kỳ từ
+-- client), để dữ liệu không mất nếu học sinh đóng trình duyệt trước khi nộp.
+create or replace function report_tab_switch(p_exam_id uuid, p_student_id uuid, p_count int)
+returns void language sql security definer as $$
+  update attempts set tab_switch_count = greatest(tab_switch_count, p_count)
+  where exam_id = p_exam_id and student_id = p_student_id;
 $$;
 
 -- RPC: học sinh bắt đầu làm bài (tạo/khởi tạo attempt in_progress, kiểm tra
@@ -307,7 +365,18 @@ returns table (
   from exams where id = p_exam_id;
 $$;
 
--- RPC: lấy attempt hiện tại của học sinh cho 1 đề (đáp án đã lưu tạm, điểm nếu có)
+-- RPC: lấy toàn bộ điểm số các đợt đã nộp của 1 học sinh (báo cáo cá nhân)
+create or replace function get_student_progress(p_student_id uuid)
+returns table (exam_id uuid, title text, wave_number int, score numeric, max_points numeric, submitted_at timestamptz)
+language sql security definer as $$
+  select e.id, e.title, e.wave_number, a.score,
+    (select coalesce(sum(q.points), 0) from questions q where q.exam_id = e.id) as max_points,
+    a.submitted_at
+  from attempts a
+  join exams e on e.id = a.exam_id
+  where a.student_id = p_student_id and a.status = 'submitted' and a.score is not null
+  order by e.wave_number asc;
+$$;
 create or replace function get_my_attempt(p_exam_id uuid, p_student_id uuid)
 returns table (status text, answers jsonb, score numeric, submitted_at timestamptz)
 language sql security definer as $$
