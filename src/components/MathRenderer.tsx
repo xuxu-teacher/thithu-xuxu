@@ -1,39 +1,55 @@
-import { useMemo } from 'react'
-import katex from 'katex'
+import { memo, useEffect, useRef } from 'react'
+
+/**
+ * Render HTML có chứa công thức LaTeX ($...$ / $$...$$) bằng MathJax 3.
+ * MathJax được cấu hình và nạp sẵn trong index.html (giống cách dự án
+ * "taodeword" tham khảo đã dùng) — xử lý tốt các cấu trúc phức tạp
+ * (ma trận, hệ phương trình \begin{aligned}...\end{aligned}, phân số lồng
+ * nhau...) tốt hơn KaTeX, và không phụ thuộc thêm thư viện nào ở phía app.
+ */
+declare global {
+  interface Window {
+    MathJax?: {
+      typesetPromise?: (elements?: HTMLElement[]) => Promise<void>
+      typesetClear?: (elements?: HTMLElement[]) => void
+    }
+  }
+}
 
 interface Props {
   html: string
   className?: string
+  block?: boolean
 }
 
-/**
- * Nhận vào một đoạn HTML (đã convert từ Word, có thể chứa <img>, bảng, v.v.)
- * và render các đoạn công thức LaTeX đặt trong $...$ (inline) hoặc $$...$$
- * (block) thành công thức toán đẹp bằng KaTeX. Phần HTML còn lại giữ nguyên.
- */
-export default function MathRenderer({ html, className }: Props) {
-  const rendered = useMemo(() => renderMathInHtml(html), [html])
-  return <div className={className} dangerouslySetInnerHTML={{ __html: rendered }} />
+function MathRenderer({ html, className = '', block = false }: Props) {
+  const ref = useRef<HTMLDivElement | HTMLSpanElement>(null)
+  const lastValue = useRef<string>('')
+
+  useEffect(() => {
+    if (!ref.current) return
+    if (lastValue.current === html) return
+    ref.current.innerHTML = html
+    lastValue.current = html
+
+    const timer = window.setTimeout(() => {
+      if (!ref.current || !window.MathJax?.typesetPromise) return
+      window.MathJax.typesetClear?.([ref.current])
+      window.MathJax.typesetPromise([ref.current]).catch((err) =>
+        console.error('[MathRenderer] Lỗi khi render công thức:', err)
+      )
+    }, 10)
+    return () => window.clearTimeout(timer)
+  }, [html])
+
+  const Tag = block ? 'div' : 'span'
+  return (
+    <Tag
+      ref={ref as any}
+      className={className}
+      style={{ whiteSpace: block ? 'pre-wrap' : 'normal', overflowWrap: 'anywhere' }}
+    />
+  )
 }
 
-function renderMathInHtml(html: string): string {
-  // Block: $$...$$
-  let out = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, expr) => {
-    try {
-      return katex.renderToString(expr.trim(), { throwOnError: false, displayMode: true })
-    } catch {
-      return `<span class="math-error">${expr}</span>`
-    }
-  })
-
-  // Inline: $...$
-  out = out.replace(/\$([^\$\n]+?)\$/g, (_, expr) => {
-    try {
-      return katex.renderToString(expr.trim(), { throwOnError: false, displayMode: false })
-    } catch {
-      return `<span class="math-error">${expr}</span>`
-    }
-  })
-
-  return out
-}
+export default memo(MathRenderer)

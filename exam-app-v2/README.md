@@ -80,42 +80,22 @@ Cấu hình theo từng đề thi (`exams.scoring_method`), logic nằm ở `src
   1.4) → tự động bị chặn ở đợt kế tiếp cho tới khi **quay lại hoàn thành đúng đợt đã bỏ dở**
   (giáo viên có thể mở lại cổng thi của đợt cũ bằng cách sửa `close_at` nếu muốn cho thi bù).
 
-## 8. Đọc file Word & công thức MathType (yêu cầu #6) — đã nâng cấp
+## 8. Công thức MathType & hình ảnh (yêu cầu #6) — lưu ý quan trọng
 
-Bộ phân tích Word đã được thay bằng engine đọc trực tiếp XML bên trong file `.docx` (không qua
-thư viện trung gian như trước), cho phép:
+MathType chèn công thức vào Word dưới dạng đối tượng OLE/OMML mà trình duyệt không thể tự vẽ lại
+đẹp như Word. Có 2 cách để **hiển thị không lỗi 100%**:
 
-- **Tự tách 3 phần đề thi**: PHẦN 1 (trắc nghiệm), PHẦN 2 (đúng/sai 4 ý), PHẦN 3 (trả lời ngắn) —
-  theo các tiêu đề thường dùng trong đề thi Việt Nam (không phân biệt hoa/thường, có/không dấu).
-- **Tự nhận đáp án đúng** — đây là điểm khác biệt lớn nhất: bạn chỉ cần soạn đề trong Word như
-  bình thường, sau đó **bôi đen và gạch chân (Ctrl+U)** đáp án đúng của câu trắc nghiệm, hoặc các
-  ý đúng của câu Đúng/Sai. Hệ thống tự đọc định dạng gạch chân này khi tải file lên — không cần
-  thao tác lại trên web. Câu trả lời ngắn tự nhận qua dòng `Đáp án: ...` trong file.
-- **Giữ nguyên hình ảnh** — nhúng thẳng base64 vào câu hỏi, không bao giờ vỡ link.
-- Sau khi tải lên, các câu **chưa xác định chắc chắn đáp án** (ví dụ quên gạch chân) sẽ được đánh
-  dấu **"⚠ Cần rà lại đáp án"** ngay trong màn hình soạn đề để giáo viên kiểm tra lại trước khi
-  lưu — tránh sai sót âm thầm.
+1. **Khuyến nghị**: trong Word, chuyển công thức MathType sang ảnh (MathType > Convert Equations
+   > Image, hoặc chụp ảnh công thức rồi chèn lại làm Picture). Khi tải file lên hệ thống, công cụ
+   `mammoth.js` (đã tích hợp ở `src/utils/docxParser.ts`) sẽ trích xuất mọi ảnh (bao gồm ảnh công
+   thức, hình vẽ hình học, biểu đồ...) và nhúng thẳng vào câu hỏi dạng base64 — không bao giờ vỡ
+   link ảnh.
+2. **Nếu muốn công thức sắc nét, chọn được, không phải ảnh**: gõ trực tiếp bằng cú pháp LaTeX
+   trong Word, đặt trong `$...$` (công thức trong dòng) hoặc `$$...$$` (công thức khối). App tự
+   nhận diện và render bằng KaTeX (`src/components/MathRenderer.tsx`).
 
-### Công thức toán (MathJax thay cho KaTeX)
-
-Toàn bộ hiển thị công thức đã chuyển sang **MathJax 3** (cấu hình sẵn trong `index.html`) — xử lý
-tốt hơn các cấu trúc phức tạp (hệ phương trình, ma trận, phân số lồng nhau) so với KaTeX trước
-đây, và là chuẩn được nhiều hệ thống thi thử tại Việt Nam dùng.
-
-- **Công thức gõ bằng LaTeX** trực tiếp trong Word, đặt trong `$...$` (trong dòng) hoặc `$$...$$`
-  (dạng khối) → hiển thị chính xác 100%, không cần công cụ gì thêm.
-- **Công thức chèn bằng công cụ MathType** (đối tượng OLE nhúng trong Word): trình duyệt không
-  tự đọc được cấu trúc này. Có 2 cách xử lý:
-  1. Nếu bạn đã có sẵn **máy chủ chuyển đổi MathType → LaTeX** riêng (ví dụ từ dự án cũ), điền
-     địa chỉ máy chủ đó vào biến môi trường `VITE_MATHTYPE_SERVER_URL` (thêm cả trong `.env` khi
-     chạy local và trong Environment Variables của Vercel) — hệ thống sẽ tự gửi công thức tới máy
-     chủ này để chuyển đổi khi tải file Word lên.
-  2. Nếu **không có** máy chủ này, hệ thống sẽ cảnh báo ngay khi tải file lên rằng công thức
-     MathType không hiển thị được. Cách khắc phục chắc chắn 100% dù không cần máy chủ: trong
-     Word, chọn công thức → **MathType > Convert Equations > Image** (hoặc chụp ảnh công thức)
-     rồi chèn lại làm ảnh — hệ thống sẽ giữ nguyên ảnh này không lỗi.
-
-
+Ảnh/hình vẽ thông thường (không phải công thức) luôn được giữ nguyên nhờ cơ chế nhúng base64 nói
+trên, không phụ thuộc đường link ngoài nên không bao giờ bị lỗi "ảnh vỡ".
 
 ## 9. Cấu trúc thư mục
 

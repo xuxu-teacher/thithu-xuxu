@@ -13,15 +13,6 @@ export interface TrueFalseOption {
   correct: boolean
 }
 
-/** Ảnh trích xuất trực tiếp từ file Word (đã nhúng base64) */
-export interface ParsedImage {
-  id: string
-  filename: string
-  base64: string
-  contentType: string
-  rId?: string
-}
-
 export interface Question {
   id: string
   exam_id: string
