@@ -51,7 +51,7 @@ export default function TeacherExamCreate() {
       const needReview = result.questions.filter((q) => q.needsReview).length
       if (needReview > 0) {
         notices.push(
-          `${needReview} câu chưa xác định chắc chắn đáp án đúng (được đánh dấu "Cần rà lại" bên dưới) — hãy kiểm tra lại, đặc biệt nếu bạn quên gạch chân (Ctrl+U) đáp án/ý đúng trong file Word.`
+          `${needReview} câu được đánh dấu "⚠ Cần rà lại" bên dưới — do chưa xác định chắc chắn đáp án đúng (ví dụ quên gạch chân Ctrl+U trong Word), hoặc do công thức toán có dấu hiệu bị lỗi khi tách từ file (ngoặc \\left/\\right không khớp, hoặc lẫn dấu ngoặc kép sát công thức). Hãy xem lại khung xem trước của từng câu được đánh dấu trước khi lưu đề.`
         )
       }
       if (result.mathTypeDetected && !result.mathTypeServerConfigured) {
@@ -219,7 +219,7 @@ export default function TeacherExamCreate() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <b>Câu {q.order_index}</b>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {q.needsReview && <span className="badge warn">⚠ Cần rà lại đáp án</span>}
+                  {q.needsReview && <span className="badge warn">⚠ Cần rà lại</span>}
                   <button type="button" className="btn danger" onClick={() => removeQuestion(q.key)}>
                     Xóa
                   </button>

@@ -46,6 +46,9 @@ export default function StudentResult() {
         <p style={{ fontSize: 22 }}>
           Điểm của bạn: <b>{score ?? '-'}</b>
         </p>
+        <button className="btn secondary no-print" onClick={() => window.print()}>
+          🖨️ In / Tải đề này để luyện lại
+        </button>
       </div>
 
       {questions.map((q, idx) => {

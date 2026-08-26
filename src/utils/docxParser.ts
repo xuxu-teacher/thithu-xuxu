@@ -667,6 +667,23 @@ function imagesToHtml(images: ParsedImage[]): string {
     .join('')
 }
 
+/**
+ * Phát hiện các dấu hiệu công thức/nội dung có khả năng bị lỗi sau khi tách
+ * từ Word, để đánh dấu "cần rà lại" thay vì để lọt ra cho học sinh thấy:
+ *  - Số lượng \left và \right không khớp nhau (dấu ngoặc lớn không đủ cặp) —
+ *    thường do máy chủ chuyển đổi MathType tạo LaTeX chưa hoàn chỉnh.
+ *  - Dấu nháy/ngoặc kép nằm sát ngay cạnh dấu $ — dấu hiệu công thức bị lẫn
+ *    ký tự trích dẫn từ câu văn xung quanh trong lúc ghép nội dung.
+ */
+function detectMathIssues(html: string): boolean {
+  if (!html) return false
+  const leftCount = (html.match(/\\left/g) || []).length
+  const rightCount = (html.match(/\\right/g) || []).length
+  if (leftCount !== rightCount) return true
+  if (/["'”“‘’]\s*\$|\$\s*["'”“‘’]/.test(html)) return true
+  return false
+}
+
 function rawToDraft(q: RawQuestion, index: number): DraftQuestionData {
   const contentHtml = escapeHtmlPreserveLaTeX(q.text) + imagesToHtml(q.images)
   const explanationHtml = escapeHtmlPreserveLaTeX(q.solution) + imagesToHtml(q.solutionImages)
@@ -676,12 +693,14 @@ function rawToDraft(q: RawQuestion, index: number): DraftQuestionData {
       const found = q.options.find((o) => o.letter === letter)
       return { key: letter, html: escapeHtmlPreserveLaTeX(found?.text || '') }
     })
+    const hasMathIssue =
+      detectMathIssues(contentHtml) || detectMathIssues(explanationHtml) || options.some((o) => detectMathIssues(o.html))
     return {
       key: `q_${index}`, order_index: index + 1, part: 'mcq',
       content_html: contentHtml, options,
       correct_answer: q.correctAnswer || 'A',
       explanation_html: explanationHtml, points: 0.25,
-      needsReview: !q.correctAnswer,
+      needsReview: !q.correctAnswer || hasMathIssue,
     }
   }
 
@@ -690,22 +709,25 @@ function rawToDraft(q: RawQuestion, index: number): DraftQuestionData {
       const found = q.options.find((o) => o.letter === letter) as (RawOption & { isCorrect?: boolean }) | undefined
       return { key: letter, html: escapeHtmlPreserveLaTeX(found?.text || ''), correct: !!found?.isCorrect }
     })
+    const hasMathIssue =
+      detectMathIssues(contentHtml) || detectMathIssues(explanationHtml) || options.some((o) => detectMathIssues(o.html))
     return {
       key: `q_${index}`, order_index: index + 1, part: 'true_false',
       content_html: contentHtml, options,
       correct_answer: '',
       explanation_html: explanationHtml, points: 1,
-      needsReview: !options.some((o) => o.correct),
+      needsReview: !options.some((o) => o.correct) || hasMathIssue,
     }
   }
 
   // short_answer / writing -> gộp chung short_answer, giáo viên rà lại nếu writing (tự luận)
+  const hasMathIssue = detectMathIssues(contentHtml) || detectMathIssues(explanationHtml)
   return {
     key: `q_${index}`, order_index: index + 1, part: 'short_answer',
     content_html: contentHtml, options: [],
     correct_answer: q.correctAnswer || '',
     explanation_html: explanationHtml, points: 0.5,
-    needsReview: !q.correctAnswer,
+    needsReview: !q.correctAnswer || hasMathIssue,
   }
 }
 
