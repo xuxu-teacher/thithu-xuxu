@@ -97,12 +97,17 @@ export default function StudentExamTake() {
     // dựa trên đáp án thật trong bảng questions — KHÔNG tự chấm ở client, vì
     // trong lúc làm bài client chỉ nhận đề đã ẩn đáp án (chống lộ đề qua
     // devtools), nên client không có đủ dữ liệu để tự chấm chính xác.
-    await supabase.rpc('submit_attempt', {
+    const { error: submitErr } = await supabase.rpc('submit_attempt', {
       p_exam_id: examId,
       p_student_id: student!.id,
       p_answers: answers,
       p_tab_switch_count: tabSwitchRef.current,
     })
+    if (submitErr) {
+      submittedRef.current = false
+      alert('Nộp bài thất bại: ' + submitErr.message + '\nVui lòng thử bấm "Nộp bài" lại. Nếu vẫn lỗi, báo ngay cho giáo viên.')
+      return
+    }
     navigate(`/student/exams/${examId}/result`)
   }
 

@@ -180,15 +180,24 @@ alter table questions enable row level security;
 alter table attempts enable row level security;
 
 -- Giáo viên chỉ thấy/sửa dữ liệu của chính mình
+-- An toàn để chạy lại nhiều lần: xóa policy cũ (nếu có) trước khi tạo lại.
+drop policy if exists teacher_self on teachers;
 create policy teacher_self on teachers for select using (auth.uid() = id);
+drop policy if exists teacher_self_insert on teachers;
+create policy teacher_self_insert on teachers for insert with check (auth.uid() = id);
+drop policy if exists teacher_own_classes on classes;
 create policy teacher_own_classes on classes for all using (auth.uid() = teacher_id);
+drop policy if exists teacher_own_students on students;
 create policy teacher_own_students on students for all using (
   class_id in (select id from classes where teacher_id = auth.uid())
 );
+drop policy if exists teacher_own_exams on exams;
 create policy teacher_own_exams on exams for all using (auth.uid() = teacher_id);
+drop policy if exists teacher_own_questions on questions;
 create policy teacher_own_questions on questions for all using (
   exam_id in (select id from exams where teacher_id = auth.uid())
 );
+drop policy if exists teacher_own_attempts on attempts;
 create policy teacher_own_attempts on attempts for select using (
   exam_id in (select id from exams where teacher_id = auth.uid())
 );
