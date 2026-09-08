@@ -11,6 +11,7 @@ interface Row {
   score: number | null
   submitted_at: string | null
   tab_switch_count: number
+  is_catchup: boolean
 }
 
 const statusLabel: Record<string, string> = {
@@ -64,7 +65,7 @@ export default function TeacherExamResults() {
 
     const { data: attempts } = await supabase
       .from('attempts')
-      .select('student_id, status, score, submitted_at, tab_switch_count')
+      .select('student_id, status, score, submitted_at, tab_switch_count, is_catchup')
       .eq('exam_id', examId)
 
     const attemptMap = new Map((attempts || []).map((a: any) => [a.student_id, a]))
@@ -78,6 +79,7 @@ export default function TeacherExamResults() {
         score: a?.score ?? null,
         submitted_at: a?.submitted_at ?? null,
         tab_switch_count: a?.tab_switch_count ?? 0,
+        is_catchup: a?.is_catchup ?? false,
       }
     })
     setRows(merged)
@@ -244,6 +246,7 @@ export default function TeacherExamResults() {
                   <span className={`badge ${r.status === 'submitted' ? 'correct' : r.status === 'missed' ? 'wrong' : ''}`}>
                     {statusLabel[r.status] || r.status}
                   </span>
+                  {r.is_catchup && <span className="badge warn" style={{ marginLeft: 4 }}>làm bù</span>}
                 </td>
                 <td>{r.score !== null ? toScale10(r.score, maxPoints) : '-'}</td>
                 <td>

@@ -93,9 +93,55 @@ create index if not exists idx_questions_exam on questions(exam_id);
 create index if not exists idx_attempts_exam on attempts(exam_id);
 create index if not exists idx_attempts_student on attempts(student_id);
 
--- ============================================================
--- HÀM TIỆN ÍCH
--- ============================================================
+-- ---------- KHỐI LỚP (để phân loại bài giảng) ----------
+alter table classes add column if not exists grade text; -- '10' | '11' | '12'
+
+-- ---------- CHƯƠNG & BÀI GIẢNG ----------
+create table if not exists chapters (
+  id uuid primary key default uuid_generate_v4(),
+  teacher_id uuid references teachers(id) on delete cascade,
+  grade text not null,           -- Khối: '10' | '11' | '12'
+  title text not null,           -- Tên chương, VD: "Chương 1: Mệnh đề - Tập hợp"
+  order_index int not null default 0,
+  created_at timestamptz default now()
+);
+
+create table if not exists lessons (
+  id uuid primary key default uuid_generate_v4(),
+  chapter_id uuid references chapters(id) on delete cascade,
+  title text not null,           -- Tên bài, VD: "Bài 1: Mệnh đề"
+  link text not null,            -- Link bài dạy (video, tài liệu, Google Drive...)
+  order_index int not null default 0,
+  created_at timestamptz default now()
+);
+
+alter table chapters enable row level security;
+alter table lessons enable row level security;
+
+drop policy if exists teacher_own_chapters on chapters;
+create policy teacher_own_chapters on chapters for all using (auth.uid() = teacher_id);
+drop policy if exists teacher_own_lessons on lessons;
+create policy teacher_own_lessons on lessons for all using (
+  chapter_id in (select id from chapters where teacher_id = auth.uid())
+);
+
+-- RPC: học sinh xem bài giảng theo đúng khối của lớp mình, do đúng giáo viên
+-- của lớp mình biên soạn (không thấy bài giảng của giáo viên/lớp khác).
+create or replace function get_student_lessons(p_student_id uuid)
+returns table (
+  chapter_id uuid, chapter_title text, chapter_order int,
+  lesson_id uuid, lesson_title text, lesson_link text, lesson_order int
+) language sql security definer as $$
+  select c.id, c.title, c.order_index, l.id, l.title, l.link, l.order_index
+  from students s
+  join classes cl on cl.id = s.class_id
+  join chapters c on c.teacher_id = cl.teacher_id and c.grade = cl.grade
+  join lessons l on l.chapter_id = c.id
+  where s.id = p_student_id
+  order by c.order_index, l.order_index;
+$$;
+
+
 
 -- Hash mật khẩu học sinh (dùng pgcrypto)
 create extension if not exists pgcrypto;
@@ -213,6 +259,22 @@ create policy teacher_own_attempts on attempts for select using (
 -- dùng để cảnh báo giáo viên về dấu hiệu gian lận (mở tài liệu/tra cứu ở tab khác).
 alter table attempts add column if not exists tab_switch_count int not null default 0;
 
+-- RPC: học sinh tự đổi mật khẩu (phải nhập đúng mật khẩu cũ)
+create or replace function change_student_password(
+  p_student_id uuid, p_old_password text, p_new_password text
+) returns boolean language plpgsql security definer as $$
+declare
+  v_hash text;
+begin
+  select password_hash into v_hash from students where id = p_student_id;
+  if v_hash is null or not verify_password(p_old_password, v_hash) then
+    return false;
+  end if;
+  update students set password_hash = hash_password(p_new_password) where id = p_student_id;
+  return true;
+end;
+$$;
+
 -- RPC: học sinh nộp bài — CHẤM ĐIỂM NGAY TẠI SERVER bằng đáp án thật trong
 -- bảng questions (không dùng điểm tính sẵn từ client), vì trong lúc làm bài
 -- client chỉ nhận được đề đã ẩn đáp án (xem get_exam_questions), nên client
@@ -289,22 +351,43 @@ $$;
 
 -- RPC: học sinh bắt đầu làm bài (tạo/khởi tạo attempt in_progress, kiểm tra
 -- điều kiện đợt thi trước + cổng thi còn mở hay không)
+-- Đánh dấu lượt thi "làm bù" (bắt đầu sau khi cổng thi đã đóng) — để giáo
+-- viên phân biệt được trong bảng kết quả.
+alter table attempts add column if not exists is_catchup boolean not null default false;
+
+-- Lưu số điện thoại học sinh (nếu có) — dùng làm mật khẩu ban đầu khi import
+-- từ Excel, và để giáo viên tiện tra cứu/liên hệ.
+alter table students add column if not exists phone text;
+
+-- RPC: học sinh bắt đầu làm bài. Nếu học sinh CHƯA nộp bài đợt này và cổng
+-- thi đã đóng, vẫn cho phép "làm bù" (miễn là cổng đã từng mở và đủ điều
+-- kiện về đợt trước) — để học sinh có cơ hội hoàn thành đợt bị bỏ lỡ và mở
+-- khóa đợt thi tiếp theo, thay vì bị chặn vĩnh viễn. Lượt làm bù được đánh
+-- dấu is_catchup = true để giáo viên biết đây không phải bài làm đúng giờ.
 create or replace function start_attempt(p_exam_id uuid, p_student_id uuid)
 returns text language plpgsql security definer as $$
 declare
   v_exam exams%rowtype;
+  v_is_catchup boolean;
 begin
   select * into v_exam from exams where id = p_exam_id;
   if v_exam is null then return 'Không tìm thấy đề thi.'; end if;
   if now() < v_exam.open_at then return 'Cổng thi chưa mở.'; end if;
-  if now() > v_exam.close_at then return 'Cổng thi đã đóng.'; end if;
   if not can_take_exam(p_exam_id, p_student_id) then
     return 'Bạn chưa hoàn thành đợt thi trước nên chưa đủ điều kiện thi đợt này.';
   end if;
+  if exists (
+    select 1 from attempts where exam_id = p_exam_id and student_id = p_student_id and status = 'submitted'
+  ) then
+    return 'Bạn đã nộp bài đợt thi này rồi.';
+  end if;
 
-  insert into attempts (exam_id, student_id, status, started_at)
-  values (p_exam_id, p_student_id, 'in_progress', now())
-  on conflict (exam_id, student_id) do nothing;
+  v_is_catchup := now() > v_exam.close_at;
+
+  insert into attempts (exam_id, student_id, status, started_at, is_catchup)
+  values (p_exam_id, p_student_id, 'in_progress', now(), v_is_catchup)
+  on conflict (exam_id, student_id) do update
+    set status = 'in_progress', started_at = now(), is_catchup = v_is_catchup;
 
   return null;
 end;

@@ -12,6 +12,7 @@ function randomCode(prefix: string) {
 interface ExcelRow {
   name: string
   code: string
+  phone: string
 }
 
 export default function TeacherClassDetail() {
@@ -20,6 +21,7 @@ export default function TeacherClassDetail() {
   const [students, setStudents] = useState<Student[]>([])
   const [exams, setExams] = useState<Exam[]>([])
   const [newName, setNewName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
   const [lastCreated, setLastCreated] = useState<{ code: string; password: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
@@ -29,7 +31,7 @@ export default function TeacherClassDetail() {
     setClassRoom(c as ClassRoom)
     const { data: s } = await supabase
       .from('students')
-      .select('id, class_id, student_code, full_name')
+      .select('id, class_id, student_code, full_name, phone')
       .eq('class_id', classId)
       .order('student_code')
     setStudents((s as Student[]) || [])
@@ -49,16 +51,18 @@ export default function TeacherClassDetail() {
   async function handleAddStudent(e: FormEvent) {
     e.preventDefault()
     const code = randomCode('HS')
-    const password = Math.random().toString(36).slice(2, 8)
+    const password = newPhone.trim() || Math.random().toString(36).slice(2, 8)
     const { data: hashed } = await supabase.rpc('hash_password', { plain: password })
     await supabase.from('students').insert({
       class_id: classId,
       student_code: code,
       full_name: newName,
+      phone: newPhone.trim() || null,
       password_hash: hashed,
     })
     setLastCreated({ code, password })
     setNewName('')
+    setNewPhone('')
     loadAll()
   }
 
@@ -68,8 +72,11 @@ export default function TeacherClassDetail() {
    *   - "Họ và tên" / "Ho va ten" / "Họ tên" / "Name"  -> bắt buộc
    *   - "Mã học sinh" / "Ma hoc sinh" / "Mã số" / "Code" -> tùy chọn, nếu để
    *     trống sẽ tự sinh mã ngẫu nhiên như khi thêm thủ công.
-   * Mật khẩu ban đầu của mỗi học sinh = đúng mã học sinh của em đó (dễ nhớ,
-   * giáo viên chỉ cần thông báo 1 mã duy nhất cho mỗi em).
+   *   - "Số điện thoại" / "SĐT" / "Phone" -> tùy chọn.
+   * Mật khẩu ban đầu: ƯU TIÊN số điện thoại (nếu cột này có giá trị) — vì học
+   * sinh nhớ số của mình sẵn, dễ đăng nhập lần đầu. Nếu không có số điện
+   * thoại, hệ thống tự sinh mật khẩu ngẫu nhiên như thêm thủ công bình thường.
+   * Học sinh có thể tự đổi mật khẩu sau khi đăng nhập lần đầu.
    */
   async function handleImportExcel(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -93,18 +100,20 @@ export default function TeacherClassDetail() {
         .map((row) => {
           let name = ''
           let code = ''
+          let phone = ''
           for (const [key, val] of Object.entries(row)) {
             const nk = normalizeKey(key)
             if (['hovaten', 'hoten', 'name', 'hovaten1', 'tenhocsinh'].includes(nk)) name = String(val).trim()
             if (['mahocsinh', 'maso', 'code', 'masohocsinh', 'ma'].includes(nk)) code = String(val).trim()
+            if (['sodienthoai', 'sdt', 'dienthoai', 'phone', 'sodt'].includes(nk)) phone = String(val).trim().replace(/[^0-9]/g, '')
           }
-          return { name, code }
+          return { name, code, phone }
         })
         .filter((r) => r.name)
 
       if (parsed.length === 0) {
         setImportResult(
-          'Không đọc được dòng nào. Hãy đảm bảo file có cột tiêu đề "Họ và tên" (bắt buộc) và có thể thêm cột "Mã học sinh" (tùy chọn).'
+          'Không đọc được dòng nào. Hãy đảm bảo file có cột tiêu đề "Họ và tên" (bắt buộc); có thể thêm cột "Mã học sinh" và "Số điện thoại" (tùy chọn).'
         )
         setImporting(false)
         e.target.value = ''
@@ -113,27 +122,30 @@ export default function TeacherClassDetail() {
 
       let success = 0
       let failed = 0
-      const createdList: { code: string; name: string }[] = []
+      let withPhone = 0
 
       for (const row of parsed) {
         const code = row.code || randomCode('HS')
-        const password = row.code || Math.random().toString(36).slice(2, 8) // mật khẩu = mã số nếu có, nếu không thì random
+        const password = row.phone || Math.random().toString(36).slice(2, 8)
+        if (row.phone) withPhone++
         const { data: hashed, error: hashErr } = await supabase.rpc('hash_password', { plain: password })
         if (hashErr) { failed++; continue }
         const { error: insErr } = await supabase.from('students').insert({
           class_id: classId,
           student_code: code,
           full_name: row.name,
+          phone: row.phone || null,
           password_hash: hashed,
         })
         if (insErr) failed++
-        else { success++; createdList.push({ code, name: row.name }) }
+        else success++
       }
 
       setImportResult(
         `Đã thêm thành công ${success}/${parsed.length} học sinh` +
           (failed > 0 ? ` (${failed} dòng lỗi — có thể do trùng mã học sinh).` : '.') +
-          ' Mật khẩu ban đầu của mỗi em chính là mã học sinh của em đó — hãy thông báo mã này cho từng em.'
+          ` Trong đó ${withPhone} em có số điện thoại → mật khẩu ban đầu chính là số điện thoại của em đó; ` +
+          `${success - withPhone} em còn lại được sinh mật khẩu ngẫu nhiên (báo học sinh vào mục "Đổi mật khẩu" để tự đặt lại).`
       )
       loadAll()
     } catch (err: any) {
@@ -172,10 +184,14 @@ export default function TeacherClassDetail() {
         <h3>Thêm học sinh</h3>
 
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-          <form onSubmit={handleAddStudent} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flex: 1, minWidth: 280 }}>
+          <form onSubmit={handleAddStudent} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flex: 1, minWidth: 280, flexWrap: 'wrap' }}>
             <div style={{ flex: 1 }}>
-              <label>Thêm từng em (tự sinh mã HS)</label>
+              <label>Thêm từng em</label>
               <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Họ và tên học sinh" required />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label>SĐT (tùy chọn — dùng làm mật khẩu)</label>
+              <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Để trống sẽ tự sinh mật khẩu" />
             </div>
             <button className="btn secondary" type="submit" style={{ marginBottom: 12 }}>
               Thêm
@@ -186,8 +202,9 @@ export default function TeacherClassDetail() {
             <label>Hoặc nhập cả danh sách từ file Excel (.xlsx)</label>
             <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} disabled={importing} />
             <p style={{ fontSize: 12.5, margin: 0 }}>
-              File cần có cột <b>Họ và tên</b> (bắt buộc), có thể thêm cột <b>Mã học sinh</b> (nếu để trống hệ
-              thống tự sinh mã). Mật khẩu ban đầu = đúng mã học sinh.
+              File cần có cột <b>Họ và tên</b> (bắt buộc), có thể thêm cột <b>Mã học sinh</b> và{' '}
+              <b>Số điện thoại</b> (đều tùy chọn). Nếu có số điện thoại, mật khẩu ban đầu = số điện thoại;
+              nếu không, hệ thống tự sinh mật khẩu ngẫu nhiên.
             </p>
           </div>
         </div>
@@ -206,6 +223,7 @@ export default function TeacherClassDetail() {
             <tr>
               <th>Mã học sinh</th>
               <th>Họ và tên</th>
+              <th>SĐT</th>
               <th></th>
             </tr>
           </thead>
@@ -214,6 +232,7 @@ export default function TeacherClassDetail() {
               <tr key={s.id}>
                 <td>{s.student_code}</td>
                 <td>{s.full_name}</td>
+                <td>{s.phone || '-'}</td>
                 <td>
                   <button className="btn danger" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => handleDeleteStudent(s.id, s.full_name)}>
                     Xóa
@@ -223,7 +242,7 @@ export default function TeacherClassDetail() {
             ))}
             {students.length === 0 && (
               <tr>
-                <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                <td colSpan={4} style={{ color: 'var(--muted)' }}>
                   Chưa có học sinh nào.
                 </td>
               </tr>

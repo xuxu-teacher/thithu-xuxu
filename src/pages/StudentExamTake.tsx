@@ -47,7 +47,11 @@ export default function StudentExamTake() {
 
       const close = new Date((examInfo as any).close_at).getTime()
       const durationEnd = Date.now() + (examInfo as any).duration_minutes * 60_000
-      const deadline = Math.min(close, durationEnd)
+      // Nếu đang "làm bù" (cổng thi đã đóng từ trước khi bắt đầu làm), KHÔNG
+      // giới hạn theo giờ đóng cổng nữa (nó đã ở quá khứ) — chỉ tính theo
+      // thời lượng đề như bình thường. Chỉ áp giới hạn giờ đóng khi đang làm
+      // đúng lúc cổng còn mở.
+      const deadline = close > Date.now() ? Math.min(close, durationEnd) : durationEnd
       setSecondsLeft(Math.max(0, Math.floor((deadline - Date.now()) / 1000)))
       setLoading(false)
     }

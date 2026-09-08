@@ -10,7 +10,9 @@ import TeacherClassDetail from './pages/TeacherClassDetail'
 import TeacherExamCreate from './pages/TeacherExamCreate'
 import TeacherExamResults from './pages/TeacherExamResults'
 import TeacherAllExams from './pages/TeacherAllExams'
+import TeacherLessons from './pages/TeacherLessons'
 import StudentDashboard from './pages/StudentDashboard'
+import StudentLessons from './pages/StudentLessons'
 import StudentExamTake from './pages/StudentExamTake'
 import StudentResult from './pages/StudentResult'
 
@@ -64,6 +66,22 @@ export default function App() {
           }
         />
 
+        <Route
+          path="/teacher/lessons"
+          element={
+            <TeacherRoute>
+              <TeacherLessons />
+            </TeacherRoute>
+          }
+        />
+        <Route
+          path="/student/lessons"
+          element={
+            <StudentRoute>
+              <StudentLessons />
+            </StudentRoute>
+          }
+        />
         <Route
           path="/student/dashboard"
           element={

@@ -20,6 +20,9 @@ export default function TopBar() {
       <div className="topbar-right">
         {teacher && (
           <>
+            <Link to="/teacher/lessons" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
+              Bài giảng
+            </Link>
             <Link to="/teacher/exams" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
               Ngân hàng đề thi
             </Link>
@@ -40,6 +43,9 @@ export default function TopBar() {
         )}
         {student && (
           <>
+            <Link to="/student/lessons" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
+              Bài giảng
+            </Link>
             <span className="topbar-user">
               <span className="avatar">{initials(student.full_name)}</span>
               {student.full_name} · {student.class_code}

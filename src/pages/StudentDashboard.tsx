@@ -99,17 +99,24 @@ export default function StudentDashboard() {
             action = <Link to={`/student/exams/${r.exam_id}/result`}>Xem lại bài & lời giải →</Link>
           } else if (!r.eligible) {
             action = <span className="badge wrong">Chưa đủ điều kiện thi (cần hoàn thành đợt trước)</span>
-          } else if (r.attempt_status === 'missed') {
-            action = <span className="badge wrong">Đã bỏ lỡ đợt thi này</span>
-          } else if (!isOpenNow && now < open) {
+          } else if (now < open) {
             action = <span className="badge">Chưa mở cổng thi</span>
-          } else if (!isOpenNow && now > close) {
-            action = <span className="badge wrong">Đã đóng cổng thi</span>
-          } else {
+          } else if (isOpenNow) {
             action = (
               <Link to={`/student/exams/${r.exam_id}/take`} className="btn">
                 Vào thi
               </Link>
+            )
+          } else {
+            // Đã đóng cổng thi nhưng chưa nộp bài (bỏ lỡ/chưa từng làm) — vẫn
+            // cho phép làm bù để có thể mở khóa đợt thi tiếp theo.
+            action = (
+              <div>
+                <span className="badge wrong" style={{ marginRight: 8 }}>Đã đóng cổng thi — chưa nộp bài</span>
+                <Link to={`/student/exams/${r.exam_id}/take`} className="btn secondary">
+                  🔄 Làm bù đề này
+                </Link>
+              </div>
             )
           }
 

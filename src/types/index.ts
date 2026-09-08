@@ -53,6 +53,23 @@ export interface ClassRoom {
   teacher_id: string
   class_code: string
   class_name: string
+  grade?: string | null
+}
+
+export interface Chapter {
+  id: string
+  teacher_id: string
+  grade: string
+  title: string
+  order_index: number
+}
+
+export interface Lesson {
+  id: string
+  chapter_id: string
+  title: string
+  link: string
+  order_index: number
 }
 
 export interface Student {
@@ -60,6 +77,7 @@ export interface Student {
   class_id: string
   student_code: string
   full_name: string
+  phone?: string | null
 }
 
 export interface Attempt {
