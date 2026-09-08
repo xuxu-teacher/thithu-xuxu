@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { parseWordExam, DraftQuestionData } from '../utils/docxParser'
+import { handlePasteImage, fileToImgTag } from '../utils/imagePaste'
 import { MCQOption, QuestionPart, ScoringMethod, TrueFalseOption } from '../types'
 import MathRenderer from '../components/MathRenderer'
 
@@ -329,7 +330,31 @@ export default function TeacherExamCreate() {
               </div>
 
               <label>Nội dung câu hỏi (HTML — có thể chỉnh sửa trực tiếp)</label>
-              <textarea rows={4} value={q.content_html} onChange={(e) => updateQuestion(q.key, { content_html: e.target.value })} />
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -8 }}>
+                💡 Đề bị lỗi công thức/hình vẽ? Dán trực tiếp ảnh (Ctrl+V, ví dụ ảnh chụp màn hình công thức
+                đúng) vào ô bên dưới, hoặc bấm "📷 Chèn ảnh" để chọn file.
+              </p>
+              <textarea
+                rows={4}
+                value={q.content_html}
+                onChange={(e) => updateQuestion(q.key, { content_html: e.target.value })}
+                onPaste={(e) => handlePasteImage(e, (img) => updateQuestion(q.key, { content_html: q.content_html + img }))}
+              />
+              <label className="btn secondary" style={{ display: 'inline-flex', cursor: 'pointer', marginBottom: 12 }}>
+                📷 Chèn ảnh vào câu hỏi
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const img = await fileToImgTag(file)
+                    updateQuestion(q.key, { content_html: q.content_html + img })
+                    e.target.value = ''
+                  }}
+                />
+              </label>
               <div className="card" style={{ background: '#fafbfe' }}>
                 <MathRenderer html={q.content_html} block />
               </div>
@@ -413,7 +438,27 @@ export default function TeacherExamCreate() {
               )}
 
               <label>Lời giải chi tiết (hiển thị cho học sinh sau khi nộp bài)</label>
-              <textarea rows={3} value={q.explanation_html} onChange={(e) => updateQuestion(q.key, { explanation_html: e.target.value })} />
+              <textarea
+                rows={3}
+                value={q.explanation_html}
+                onChange={(e) => updateQuestion(q.key, { explanation_html: e.target.value })}
+                onPaste={(e) => handlePasteImage(e, (img) => updateQuestion(q.key, { explanation_html: q.explanation_html + img }))}
+              />
+              <label className="btn secondary" style={{ display: 'inline-flex', cursor: 'pointer' }}>
+                📷 Chèn ảnh vào lời giải
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const img = await fileToImgTag(file)
+                    updateQuestion(q.key, { explanation_html: q.explanation_html + img })
+                    e.target.value = ''
+                  }}
+                />
+              </label>
             </div>
           ))}
         </div>
