@@ -111,9 +111,16 @@ create table if not exists lessons (
   chapter_id uuid references chapters(id) on delete cascade,
   title text not null,           -- Tên bài, VD: "Bài 1: Mệnh đề"
   link text not null,            -- Link bài dạy (video, tài liệu, Google Drive...)
+  exam_file_link text,           -- Link file đề đính kèm (tùy chọn)
+  solution_file_link text,       -- Link file lời giải tham khảo đính kèm (tùy chọn)
   order_index int not null default 0,
   created_at timestamptz default now()
 );
+
+-- An toàn khi bảng lessons đã tồn tại từ trước (create table if not exists ở
+-- trên sẽ không tự thêm cột mới vào bảng đã có sẵn).
+alter table lessons add column if not exists exam_file_link text;
+alter table lessons add column if not exists solution_file_link text;
 
 alter table chapters enable row level security;
 alter table lessons enable row level security;
@@ -127,12 +134,17 @@ create policy teacher_own_lessons on lessons for all using (
 
 -- RPC: học sinh xem bài giảng theo đúng khối của lớp mình, do đúng giáo viên
 -- của lớp mình biên soạn (không thấy bài giảng của giáo viên/lớp khác).
+-- drop trước vì Postgres không cho "create or replace" đổi kiểu trả về hàm
+-- (bảng OUT parameters) khác với lần định nghĩa trước đó.
+drop function if exists get_student_lessons(uuid);
 create or replace function get_student_lessons(p_student_id uuid)
 returns table (
   chapter_id uuid, chapter_title text, chapter_order int,
-  lesson_id uuid, lesson_title text, lesson_link text, lesson_order int
+  lesson_id uuid, lesson_title text, lesson_link text, lesson_order int,
+  exam_file_link text, solution_file_link text
 ) language sql security definer as $$
-  select c.id, c.title, c.order_index, l.id, l.title, l.link, l.order_index
+  select c.id, c.title, c.order_index, l.id, l.title, l.link, l.order_index,
+         l.exam_file_link, l.solution_file_link
   from students s
   join classes cl on cl.id = s.class_id
   join chapters c on c.teacher_id = cl.teacher_id and c.grade = cl.grade
@@ -280,6 +292,13 @@ $$;
 -- client chỉ nhận được đề đã ẩn đáp án (xem get_exam_questions), nên client
 -- không thể tự chấm chính xác — và cũng không nên tin điểm do client gửi lên
 -- vì có thể bị sửa qua devtools. Hỗ trợ cả 2 cách tính điểm câu Đúng/Sai.
+-- drop trước: tham số của hàm này từng đổi từ p_score (numeric) sang
+-- p_tab_switch_count (int) ở bản cập nhật trước — Postgres coi đây là chữ ký
+-- khác nên "create or replace" sẽ tạo thêm bản chồng lấn thay vì thay thế,
+-- cần xóa sạch mọi phiên bản cũ trước khi tạo lại.
+drop function if exists submit_attempt(uuid, uuid, jsonb, numeric);
+drop function if exists submit_attempt(uuid, uuid, jsonb, int);
+drop function if exists submit_attempt(uuid, uuid, jsonb);
 create or replace function submit_attempt(
   p_exam_id uuid, p_student_id uuid, p_answers jsonb, p_tab_switch_count int default 0
 ) returns numeric language plpgsql security definer as $$

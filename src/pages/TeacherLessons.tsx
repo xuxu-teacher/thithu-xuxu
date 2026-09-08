@@ -13,6 +13,8 @@ export default function TeacherLessons() {
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [newLessonTitle, setNewLessonTitle] = useState<Record<string, string>>({})
   const [newLessonLink, setNewLessonLink] = useState<Record<string, string>>({})
+  const [newExamFileLink, setNewExamFileLink] = useState<Record<string, string>>({})
+  const [newSolutionFileLink, setNewSolutionFileLink] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
 
   async function loadChapters() {
@@ -73,12 +75,23 @@ export default function TeacherLessons() {
     setError(null)
     const title = (newLessonTitle[chapterId] || '').trim()
     const link = (newLessonLink[chapterId] || '').trim()
+    const examFileLink = (newExamFileLink[chapterId] || '').trim()
+    const solutionFileLink = (newSolutionFileLink[chapterId] || '').trim()
     if (!title || !link) return
     const order = (lessonsByChapter[chapterId]?.length || 0)
-    const { error } = await supabase.from('lessons').insert({ chapter_id: chapterId, title, link, order_index: order })
+    const { error } = await supabase.from('lessons').insert({
+      chapter_id: chapterId,
+      title,
+      link,
+      exam_file_link: examFileLink || null,
+      solution_file_link: solutionFileLink || null,
+      order_index: order,
+    })
     if (error) return setError(error.message)
     setNewLessonTitle((p) => ({ ...p, [chapterId]: '' }))
     setNewLessonLink((p) => ({ ...p, [chapterId]: '' }))
+    setNewExamFileLink((p) => ({ ...p, [chapterId]: '' }))
+    setNewSolutionFileLink((p) => ({ ...p, [chapterId]: '' }))
     loadChapters()
   }
 
@@ -137,32 +150,62 @@ export default function TeacherLessons() {
             <div className="tf-row" key={l.id}>
               <span style={{ flex: 1 }}>{l.title}</span>
               <a href={l.link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
-                Xem link →
+                Bài giảng →
               </a>
+              {l.exam_file_link && (
+                <a href={l.exam_file_link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                  📄 Đề
+                </a>
+              )}
+              {l.solution_file_link && (
+                <a href={l.solution_file_link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
+                  📝 Lời giải
+                </a>
+              )}
               <button className="btn danger" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => handleDeleteLesson(l.id)}>
                 Xóa
               </button>
             </div>
           ))}
 
-          <form onSubmit={(e) => handleAddLesson(c.id, e)} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginTop: 12 }}>
-            <div style={{ flex: 1 }}>
-              <label>Tên bài</label>
-              <input
-                value={newLessonTitle[c.id] || ''}
-                onChange={(e) => setNewLessonTitle((p) => ({ ...p, [c.id]: e.target.value }))}
-                placeholder='VD: "Bài 1: Mệnh đề"'
-              />
+          <form onSubmit={(e) => handleAddLesson(c.id, e)} style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Tên bài</label>
+                <input
+                  value={newLessonTitle[c.id] || ''}
+                  onChange={(e) => setNewLessonTitle((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder='VD: "Bài 1: Mệnh đề"'
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Link bài giảng (bắt buộc)</label>
+                <input
+                  value={newLessonLink[c.id] || ''}
+                  onChange={(e) => setNewLessonLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder="https://..."
+                />
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <label>Link bài dạy</label>
-              <input
-                value={newLessonLink[c.id] || ''}
-                onChange={(e) => setNewLessonLink((p) => ({ ...p, [c.id]: e.target.value }))}
-                placeholder="https://..."
-              />
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Link file đề đính kèm (tùy chọn)</label>
+                <input
+                  value={newExamFileLink[c.id] || ''}
+                  onChange={(e) => setNewExamFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder="Link Google Drive / Word / PDF..."
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Link file lời giải tham khảo (tùy chọn)</label>
+                <input
+                  value={newSolutionFileLink[c.id] || ''}
+                  onChange={(e) => setNewSolutionFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder="Link Google Drive / Word / PDF..."
+                />
+              </div>
             </div>
-            <button className="btn secondary" type="submit" style={{ marginBottom: 12 }}>
+            <button className="btn secondary" type="submit">
               + Thêm bài
             </button>
           </form>

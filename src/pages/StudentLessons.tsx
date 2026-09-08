@@ -10,6 +10,8 @@ interface Row {
   lesson_title: string
   lesson_link: string
   lesson_order: number
+  exam_file_link: string | null
+  solution_file_link: string | null
 }
 
 export default function StudentLessons() {
@@ -56,6 +58,16 @@ export default function StudentLessons() {
               <a href={l.lesson_link} target="_blank" rel="noreferrer" className="btn secondary" style={{ padding: '6px 14px', fontSize: 13 }}>
                 Xem bài giảng →
               </a>
+              {l.exam_file_link && (
+                <a href={l.exam_file_link} target="_blank" rel="noreferrer" className="btn secondary" style={{ padding: '6px 14px', fontSize: 13 }}>
+                  📄 Tải đề
+                </a>
+              )}
+              {l.solution_file_link && (
+                <a href={l.solution_file_link} target="_blank" rel="noreferrer" className="btn secondary" style={{ padding: '6px 14px', fontSize: 13 }}>
+                  📝 Tải lời giải
+                </a>
+              )}
             </div>
           ))}
         </div>

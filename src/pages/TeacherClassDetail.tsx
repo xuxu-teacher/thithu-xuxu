@@ -9,6 +9,20 @@ function randomCode(prefix: string) {
   return prefix + Math.random().toString(36).slice(2, 7).toUpperCase()
 }
 
+/** Tạo và tải xuống file Excel mẫu đúng định dạng import danh sách học sinh. */
+function downloadSampleExcel() {
+  const sample = [
+    { 'Họ và tên': 'Nguyễn Văn A', 'Mã học sinh': 'HS0001', 'Số điện thoại': '0901234567' },
+    { 'Họ và tên': 'Trần Thị B', 'Mã học sinh': 'HS0002', 'Số điện thoại': '0912345678' },
+    { 'Họ và tên': 'Lê Văn C', 'Mã học sinh': '', 'Số điện thoại': '' },
+  ]
+  const ws = XLSX.utils.json_to_sheet(sample)
+  ws['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 16 }]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Danh sách học sinh')
+  XLSX.writeFile(wb, 'mau_danh_sach_hoc_sinh.xlsx')
+}
+
 interface ExcelRow {
   name: string
   code: string
@@ -206,6 +220,9 @@ export default function TeacherClassDetail() {
               <b>Số điện thoại</b> (đều tùy chọn). Nếu có số điện thoại, mật khẩu ban đầu = số điện thoại;
               nếu không, hệ thống tự sinh mật khẩu ngẫu nhiên.
             </p>
+            <button type="button" className="btn secondary" style={{ marginTop: 8 }} onClick={downloadSampleExcel}>
+              📥 Tải file mẫu Excel
+            </button>
           </div>
         </div>
 

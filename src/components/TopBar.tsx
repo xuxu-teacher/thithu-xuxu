@@ -43,6 +43,9 @@ export default function TopBar() {
         )}
         {student && (
           <>
+            <Link to="/student/dashboard" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
+              Bài thi
+            </Link>
             <Link to="/student/lessons" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
               Bài giảng
             </Link>

@@ -69,6 +69,8 @@ export interface Lesson {
   chapter_id: string
   title: string
   link: string
+  exam_file_link?: string | null
+  solution_file_link?: string | null
   order_index: number
 }
 

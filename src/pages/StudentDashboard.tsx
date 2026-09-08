@@ -89,6 +89,31 @@ export default function StudentDashboard() {
 
       <div className="card">
         <h2>Các đợt thi của lớp bạn</h2>
+        {rows.length > 0 && (
+          <p className="explanation" style={{ marginTop: 0 }}>
+            {(() => {
+              const total = rows.length
+              const done = rows.filter((r) => r.attempt_status === 'submitted').length
+              const current = rows.find(
+                (r) => r.attempt_status !== 'submitted' && now >= new Date(r.open_at).getTime() && now <= new Date(r.close_at).getTime()
+              )
+              return (
+                <>
+                  📋 Bạn đã hoàn thành <b>{done}/{total}</b> đợt thi.{' '}
+                  {current ? (
+                    <>
+                      Đợt thi hiện đang mở: <b>Đợt #{current.wave_number} — {current.title}</b>.
+                    </>
+                  ) : done < total ? (
+                    'Hiện chưa có đợt thi nào đang mở cổng.'
+                  ) : (
+                    'Bạn đã hoàn thành tất cả các đợt thi hiện có! 🎉'
+                  )}
+                </>
+              )
+            })()}
+          </p>
+        )}
         {rows.map((r) => {
           const open = new Date(r.open_at).getTime()
           const close = new Date(r.close_at).getTime()
