@@ -55,12 +55,16 @@ export default function StudentResult() {
         const ans = answers[q.id]
         const got = scoreQuestion(q, ans, scoringMethod)
         const isFullMark = got >= q.points - 1e-9
+        const isZero = got <= 1e-9
+        // Câu Đúng/Sai chấm điểm từng phần — không nên tô đỏ tuyệt đối khi
+        // học sinh đã đúng một phần (ví dụ 3/4 ý đúng = 0.5đ, không phải "sai").
+        const badgeClass = isFullMark ? 'correct' : isZero ? 'wrong' : 'warn'
 
         return (
           <div className="question-block" key={q.id}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <b>Câu {idx + 1}</b>
-              <span className={`badge ${isFullMark ? 'correct' : 'wrong'}`}>
+              <span className={`badge ${badgeClass}`}>
                 {got}/{q.points} điểm
               </span>
             </div>

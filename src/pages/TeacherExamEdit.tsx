@@ -51,6 +51,24 @@ export default function TeacherExamEdit() {
   const [error, setError] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState(false)
   const [onlyFlagged, setOnlyFlagged] = useState(false)
+  const [scrollToKey, setScrollToKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!previewMode && scrollToKey) {
+      const el = document.getElementById(`q-edit-${scrollToKey}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.style.boxShadow = '0 0 0 3px var(--accent)'
+        setTimeout(() => { el.style.boxShadow = '' }, 1800)
+      }
+      setScrollToKey(null)
+    }
+  }, [previewMode, scrollToKey])
+
+  function jumpToEdit(key: string) {
+    setScrollToKey(key)
+    setPreviewMode(false)
+  }
 
   useEffect(() => {
     async function load() {
@@ -237,9 +255,12 @@ export default function TeacherExamEdit() {
                 <div className="question-block" key={q.key}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <b>Câu {idx + 1}</b>
-                    <span>
-                      <span className="badge" style={{ marginRight: 6 }}>{q.points} điểm</span>
+                    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span className="badge">{q.points} điểm</span>
                       {q.needsReview && <span className="badge warn">⚠ Cần rà lại</span>}
+                      <button type="button" className="btn secondary" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => jumpToEdit(q.key)}>
+                        ✏️ Sửa câu này
+                      </button>
                     </span>
                   </div>
                   <MathRenderer html={q.content_html} block />
@@ -321,7 +342,7 @@ export default function TeacherExamEdit() {
           <div className="card">
             <h2>Câu hỏi ({questions.length})</h2>
             {questions.map((q) => (
-              <div className="question-block" key={q.key}>
+              <div className="question-block" id={`q-edit-${q.key}`} key={q.key}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <b>Câu {questions.indexOf(q) + 1}</b>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
