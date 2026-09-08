@@ -34,6 +34,7 @@ export default function TeacherExamCreate() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState(false)
+  const [onlyFlagged, setOnlyFlagged] = useState(false)
 
   async function handleUploadWord(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -63,6 +64,7 @@ export default function TeacherExamCreate() {
         notices.push(`Đã chuyển đổi ${result.mathTypeConvertedCount} công thức MathType sang LaTeX qua máy chủ đã cấu hình.`)
       }
       setParseNotice(notices.join(' '))
+      setPreviewMode(true) // tự động xem trước ngay sau khi tải file lên, để rà công thức lỗi trước khi lưu
     } catch (err: any) {
       setParseNotice(`Lỗi khi đọc file Word: ${err.message || err}`)
     } finally {
@@ -167,7 +169,21 @@ export default function TeacherExamCreate() {
             Đây là cách đề sẽ hiển thị cho học sinh. Rà từng câu xem công thức toán, hình ảnh có đúng không trước
             khi lưu. Câu nào có nhãn "⚠ Cần rà lại" bên dưới thì đặc biệt lưu ý.
           </p>
-          {questions.map((q, idx) => (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              style={{ width: 'auto', marginBottom: 0 }}
+              checked={onlyFlagged}
+              onChange={(e) => setOnlyFlagged(e.target.checked)}
+            />
+            Chỉ hiện các câu "⚠ Cần rà lại" ({questions.filter((q) => q.needsReview).length} câu) — để kiểm tra
+            nhanh từng câu lỗi thay vì lướt qua cả đề
+          </label>
+          {questions
+            .filter((q) => !onlyFlagged || q.needsReview)
+            .map((q) => {
+              const idx = questions.indexOf(q)
+              return (
             <div className="question-block" key={q.key}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <b>Câu {idx + 1}</b>
@@ -211,7 +227,8 @@ export default function TeacherExamCreate() {
                 </div>
               )}
             </div>
-          ))}
+              )
+            })}
         </div>
       ) : (
       <form onSubmit={handleSave}>

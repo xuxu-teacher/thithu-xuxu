@@ -82,6 +82,7 @@ export default function TeacherAllExams() {
                 <td>{new Date(r.close_at).toLocaleDateString('vi-VN')}</td>
                 <td style={{ display: 'flex', gap: 12 }}>
                   <Link to={`/teacher/exams/${r.id}/results`}>Thống kê</Link>
+                  <Link to={`/teacher/exams/${r.id}/edit`}>Sửa đề</Link>
                   <Link to={`/teacher/classes/${r.class_id}`}>Lớp</Link>
                 </td>
               </tr>

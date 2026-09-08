@@ -140,7 +140,10 @@ export default function TeacherExamResults() {
             <h2>{exam.title} — Đợt #{exam.wave_number}</h2>
             <p style={{ fontSize: 13 }}>Tổng điểm đề: {maxPoints} · Đã nộp: {submittedScores.length}/{rows.length}</p>
           </div>
-          <button className="btn danger" onClick={handleDeleteExam}>🗑 Xóa đề thi</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Link to={`/teacher/exams/${examId}/edit`} className="btn secondary">✏️ Sửa đề (câu hỏi)</Link>
+            <button className="btn danger" onClick={handleDeleteExam}>🗑 Xóa đề thi</button>
+          </div>
         </div>
 
         {!editingSchedule ? (

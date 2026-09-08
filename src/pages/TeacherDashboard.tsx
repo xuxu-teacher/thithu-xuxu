@@ -38,6 +38,18 @@ export default function TeacherDashboard() {
     loadClasses()
   }
 
+  async function handleDeleteClass(id: string, name: string) {
+    if (
+      !window.confirm(
+        `Xóa vĩnh viễn lớp "${name}"? Toàn bộ học sinh, đề thi, kết quả thi và bài giảng liên quan tới lớp này sẽ bị xóa theo. Hành động KHÔNG thể hoàn tác.`
+      )
+    )
+      return
+    const { error } = await supabase.from('classes').delete().eq('id', id)
+    if (error) { alert('Lỗi khi xóa: ' + error.message); return }
+    loadClasses()
+  }
+
   return (
     <div className="container">
       <div className="card">
@@ -86,7 +98,10 @@ export default function TeacherDashboard() {
                   <span className="badge">{c.class_code}</span>
                 </td>
                 <td>
-                  <Link to={`/teacher/classes/${c.id}`}>Quản lý →</Link>
+                  <Link to={`/teacher/classes/${c.id}`} style={{ marginRight: 12 }}>Quản lý →</Link>
+                  <button className="btn danger" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => handleDeleteClass(c.id, c.class_name)}>
+                    Xóa lớp
+                  </button>
                 </td>
               </tr>
             ))}
