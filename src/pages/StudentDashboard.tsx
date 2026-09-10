@@ -59,6 +59,11 @@ export default function StudentDashboard() {
 
   return (
     <div className="container">
+      <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <p style={{ margin: 0, fontSize: 13 }}>Muốn luyện thêm tự do, làm bao nhiêu lần cũng được?</p>
+        <Link to="/student/practice" className="btn secondary">📝 Đề thi thử</Link>
+      </div>
+
       {scale10.length > 0 && (
         <div className="card">
           <h2>📈 Quá trình học tập của bạn</h2>

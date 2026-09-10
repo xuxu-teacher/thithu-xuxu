@@ -146,6 +146,29 @@ export interface MatrixGenerateResult {
   inserted: number
 }
 
+// ---------- ĐỀ THI THỬ (practice_exams) — tự luyện, không giới hạn số lần ----------
+
+export interface PracticeExam {
+  id: string
+  title: string
+  duration_minutes: number
+  question_count: number
+  created_at: string
+}
+
+export interface PracticeQuestion {
+  id: string
+  practice_exam_id: string
+  order_index: number
+  part: QuestionPart
+  content_html: string
+  image_url?: string | null
+  options: MCQOption[] | TrueFalseOption[] | null
+  correct_answer?: string | null
+  explanation_html?: string | null
+  points: number
+}
+
 export interface StudentSession {
   id: string
   class_id: string

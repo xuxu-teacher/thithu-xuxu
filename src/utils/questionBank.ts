@@ -10,13 +10,13 @@ export interface BankDraftQuestion extends ClassifiedQuestionData {
 export async function saveQuestionsToBank(
   teacherId: string,
   grade: '10' | '11' | '12',
-  chapterIdByTopic: Record<string, string>,
+  _chapterIdByTopic: Record<string, string>,
   questions: BankDraftQuestion[],
 ): Promise<void> {
   const rows = questions.map((q) => ({
     teacher_id: teacherId,
     grade,
-    chapter_id: chapterIdByTopic[q.topic] ?? null,
+    chapter_id: null,
     topic: q.topic,
     difficulty: q.difficulty,
     part: q.part,

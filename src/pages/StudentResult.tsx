@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { Question, ScoringMethod, StudentAnswer, MCQOption, TrueFalseOption } from '../types'
 import { scoreQuestion } from '../utils/scoring'
 import MathRenderer from '../components/MathRenderer'
+import SimilarPracticeWidget from '../components/SimilarPracticeWidget'
 
 export default function StudentResult() {
   const { examId } = useParams()
@@ -129,6 +130,8 @@ export default function StudentResult() {
                 <MathRenderer html={q.explanation_html} />
               </div>
             )}
+
+            <SimilarPracticeWidget original={q} />
           </div>
         )
       })}

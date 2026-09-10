@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { getBankCounts, bankCountKey, generateExamFromMatrix } from '../utils/questionBank'
-import { Chapter, ClassRoom, MatrixCell, MatrixGenerateResult, QuestionDifficulty, QuestionPart, ScoringMethod } from '../types'
+import { getCurriculumTopics } from '../data/curriculumTopics'
+import { ClassRoom, MatrixCell, MatrixGenerateResult, QuestionDifficulty, QuestionPart, ScoringMethod } from '../types'
+import MatrixFileImport from '../components/MatrixFileImport'
 
 const DIFFICULTIES: QuestionDifficulty[] = ['Nhận biết', 'Thông hiểu', 'Vận dụng', 'Vận dụng cao']
 const PARTS: { value: QuestionPart; label: string }[] = [
@@ -18,7 +20,6 @@ export default function TeacherExamFromMatrix() {
   const navigate = useNavigate()
 
   const [classRoom, setClassRoom] = useState<ClassRoom | null>(null)
-  const [chapters, setChapters] = useState<Chapter[]>([])
   const [bankCounts, setBankCounts] = useState<Map<string, number>>(new Map())
 
   const [title, setTitle] = useState('')
@@ -41,21 +42,17 @@ export default function TeacherExamFromMatrix() {
       setClassRoom(room)
       if (!room?.grade) return
 
-      const [{ data: ch }, counts] = await Promise.all([
-        supabase.from('chapters').select('*').eq('teacher_id', teacher!.id).eq('grade', room.grade).order('order_index'),
-        getBankCounts(teacher!.id, room.grade),
-      ])
-      const chapterList = (ch as Chapter[]) || []
-      setChapters(chapterList)
+      const counts = await getBankCounts(teacher!.id, room.grade)
       setBankCounts(counts)
-      if (chapterList.length > 0) {
-        setRows([{ topic: chapterList[0].title, difficulty: 'Nhận biết', part: 'mcq', count: 1 }])
+      const topicList = getCurriculumTopics(room.grade as '10' | '11' | '12')
+      if (topicList.length > 0) {
+        setRows([{ topic: topicList[0], difficulty: 'Nhận biết', part: 'mcq', count: 1 }])
       }
     }
     if (teacher && classId) load()
   }, [teacher, classId])
 
-  const topics = chapters.map((c) => c.title)
+  const topics = classRoom?.grade ? getCurriculumTopics(classRoom.grade as '10' | '11' | '12') : []
 
   function addRow() {
     setRows((prev) => [...prev, { topic: topics[0] || '', difficulty: 'Nhận biết', part: 'mcq', count: 1 }])
@@ -183,9 +180,15 @@ export default function TeacherExamFromMatrix() {
 
             {topics.length === 0 && (
               <p style={{ color: 'var(--danger)' }}>
-                Khối {classRoom?.grade || '?'} chưa có Chương nào — không có chủ đề để dựng ma trận. Tạo Chương ở
-                mục Bài giảng trước.
+                Lớp này chưa gắn khối — vào mục Bài giảng đặt khối cho lớp trước.
               </p>
+            )}
+
+            {topics.length > 0 && (
+              <MatrixFileImport
+                topics={topics}
+                onImport={(imported) => setRows((prev) => [...prev, ...imported])}
+              />
             )}
 
             {rows.map((row, idx) => {

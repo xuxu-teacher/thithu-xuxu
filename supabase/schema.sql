@@ -494,32 +494,3 @@ language sql security definer as $$
   select status, answers, score, submitted_at from attempts
   where exam_id = p_exam_id and student_id = p_student_id;
 $$;
-
--- ============================================================
--- KHO LƯU TRỮ TÀI LIỆU (Supabase Storage) — cho phép giáo viên tải file đề/
--- lời giải/bài giảng trực tiếp lên hệ thống, tổ chức theo thư mục
--- <khối>/<tên chương>/..., thay vì phải tải lên Google Drive rồi dán link.
--- ============================================================
-insert into storage.buckets (id, name, public)
-values ('lesson-files', 'lesson-files', true)
-on conflict (id) do nothing;
-
-drop policy if exists "teacher upload lesson files" on storage.objects;
-create policy "teacher upload lesson files" on storage.objects for insert
-  to authenticated
-  with check (bucket_id = 'lesson-files');
-
-drop policy if exists "teacher update lesson files" on storage.objects;
-create policy "teacher update lesson files" on storage.objects for update
-  to authenticated
-  using (bucket_id = 'lesson-files');
-
-drop policy if exists "teacher delete lesson files" on storage.objects;
-create policy "teacher delete lesson files" on storage.objects for delete
-  to authenticated
-  using (bucket_id = 'lesson-files');
-
-drop policy if exists "public read lesson files" on storage.objects;
-create policy "public read lesson files" on storage.objects for select
-  to public
-  using (bucket_id = 'lesson-files');

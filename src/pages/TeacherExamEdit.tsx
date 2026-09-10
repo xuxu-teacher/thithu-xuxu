@@ -224,12 +224,17 @@ export default function TeacherExamEdit() {
 
   return (
     <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <Link to={`/teacher/exams/${examId}/results`} className="btn secondary">← Về trang kết quả</Link>
         {questions.length > 0 && (
           <button type="button" className="btn accent" onClick={() => setPreviewMode((v) => !v)}>
             {previewMode ? '✏️ Quay lại chỉnh sửa' : '👁 Xem trước toàn bộ đề'}
           </button>
+        )}
+        {questions.length > 0 && (
+          <Link to={`/teacher/exams/${examId}/similar`} className="btn secondary">
+            🔁 Sinh đề tương tự (đổi số)
+          </Link>
         )}
       </div>
 

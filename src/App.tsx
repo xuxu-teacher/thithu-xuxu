@@ -14,6 +14,10 @@ import TeacherAllExams from './pages/TeacherAllExams'
 import TeacherLessons from './pages/TeacherLessons'
 import TeacherQuestionBankUpload from './pages/TeacherQuestionBankUpload'
 import TeacherExamFromMatrix from './pages/TeacherExamFromMatrix'
+import TeacherExamSimilar from './pages/TeacherExamSimilar'
+import TeacherPracticeExamCreate from './pages/TeacherPracticeExamCreate'
+import StudentPracticeList from './pages/StudentPracticeList'
+import StudentPracticeTake from './pages/StudentPracticeTake'
 import StudentDashboard from './pages/StudentDashboard'
 import StudentLessons from './pages/StudentLessons'
 import StudentExamTake from './pages/StudentExamTake'
@@ -91,6 +95,38 @@ export default function App() {
             <TeacherRoute>
               <TeacherExamFromMatrix />
             </TeacherRoute>
+          }
+        />
+        <Route
+          path="/teacher/exams/:examId/similar"
+          element={
+            <TeacherRoute>
+              <TeacherExamSimilar />
+            </TeacherRoute>
+          }
+        />
+        <Route
+          path="/teacher/classes/:classId/practice/new"
+          element={
+            <TeacherRoute>
+              <TeacherPracticeExamCreate />
+            </TeacherRoute>
+          }
+        />
+        <Route
+          path="/student/practice"
+          element={
+            <StudentRoute>
+              <StudentPracticeList />
+            </StudentRoute>
+          }
+        />
+        <Route
+          path="/student/practice/:practiceExamId"
+          element={
+            <StudentRoute>
+              <StudentPracticeTake />
+            </StudentRoute>
           }
         />
         <Route

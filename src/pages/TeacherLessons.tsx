@@ -1,37 +1,8 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { Chapter, Lesson } from '../types'
-
-function slugify(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/gi, 'd')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()
-    .slice(0, 60)
-}
-
-/**
- * Upload 1 file lên kho lưu trữ (Supabase Storage, bucket "lesson-files"),
- * tổ chức theo thư mục: khoi-<khối>/<tên chương>/<timestamp>-<tên file>.
- * Trả về link công khai để lưu vào exam_file_link/solution_file_link/link.
- */
-async function uploadToStorage(file: File, grade: string, chapterTitle: string): Promise<string> {
-  const folder = `khoi-${grade}/${slugify(chapterTitle) || 'chung'}`
-  const safeName = slugify(file.name.replace(/\.[^.]+$/, '')) || 'file'
-  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : ''
-  const path = `${folder}/${Date.now()}-${safeName}${ext}`
-
-  const { error } = await supabase.storage.from('lesson-files').upload(path, file, { upsert: false })
-  if (error) throw error
-
-  const { data } = supabase.storage.from('lesson-files').getPublicUrl(path)
-  return data.publicUrl
-}
 
 export default function TeacherLessons() {
   const { teacher } = useAuth()
@@ -44,7 +15,6 @@ export default function TeacherLessons() {
   const [newLessonLink, setNewLessonLink] = useState<Record<string, string>>({})
   const [newExamFileLink, setNewExamFileLink] = useState<Record<string, string>>({})
   const [newSolutionFileLink, setNewSolutionFileLink] = useState<Record<string, string>>({})
-  const [uploading, setUploading] = useState<string | null>(null) // đang tải file nào (key = chapterId+field)
   const [error, setError] = useState<string | null>(null)
 
   async function loadChapters() {
@@ -130,30 +100,6 @@ export default function TeacherLessons() {
     loadChapters()
   }
 
-  async function handleUploadFile(
-    chapterId: string,
-    chapterTitle: string,
-    field: 'lesson' | 'exam' | 'solution',
-    e: ChangeEvent<HTMLInputElement>
-  ) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const uploadKey = `${chapterId}-${field}`
-    setUploading(uploadKey)
-    setError(null)
-    try {
-      const url = await uploadToStorage(file, grade, chapterTitle)
-      if (field === 'lesson') setNewLessonLink((p) => ({ ...p, [chapterId]: url }))
-      if (field === 'exam') setNewExamFileLink((p) => ({ ...p, [chapterId]: url }))
-      if (field === 'solution') setNewSolutionFileLink((p) => ({ ...p, [chapterId]: url }))
-    } catch (err: any) {
-      setError(`Lỗi khi tải file lên: ${err.message || err}`)
-    } finally {
-      setUploading(null)
-      e.target.value = ''
-    }
-  }
-
   return (
     <div className="container">
       <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
@@ -163,10 +109,8 @@ export default function TeacherLessons() {
       <div className="card">
         <h2>📖 Quản lý Chương & Bài giảng</h2>
         <p style={{ fontSize: 13 }}>
-          Tổ chức bài giảng theo Chương. Với mỗi bài, bạn có thể <b>tải file trực tiếp lên hệ thống</b> (được lưu
-          gọn theo thư mục <code>khoi-{grade}/&lt;tên chương&gt;/...</code>) thay vì phải tải lên Google Drive rồi
-          dán link — hoặc vẫn dán link ngoài (YouTube, Drive...) nếu muốn. Học sinh sẽ thấy đúng bài giảng theo
-          khối lớp của mình.
+          Tổ chức bài giảng theo Chương, gắn link (video, tài liệu, Google Drive...) cho từng bài. Học sinh sẽ
+          thấy đúng bài giảng theo khối lớp của mình.
         </p>
         <label>Chọn khối để soạn</label>
         <select value={grade} onChange={(e) => setGrade(e.target.value)} style={{ maxWidth: 200 }}>
@@ -225,45 +169,42 @@ export default function TeacherLessons() {
           ))}
 
           <form onSubmit={(e) => handleAddLesson(c.id, e)} style={{ marginTop: 12 }}>
-            <label>Tên bài</label>
-            <input
-              value={newLessonTitle[c.id] || ''}
-              onChange={(e) => setNewLessonTitle((p) => ({ ...p, [c.id]: e.target.value }))}
-              placeholder='VD: "Bài 1: Mệnh đề"'
-            />
-
-            {(
-              [
-                { field: 'lesson' as const, label: 'Bài giảng (bắt buộc)', value: newLessonLink[c.id], set: setNewLessonLink },
-                { field: 'exam' as const, label: 'File đề đính kèm (tùy chọn)', value: newExamFileLink[c.id], set: setNewExamFileLink },
-                { field: 'solution' as const, label: 'File lời giải tham khảo (tùy chọn)', value: newSolutionFileLink[c.id], set: setNewSolutionFileLink },
-              ]
-            ).map((row) => {
-              const uploadKey = `${c.id}-${row.field}`
-              return (
-                <div key={row.field} style={{ marginBottom: 10 }}>
-                  <label>{row.label}</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input
-                      style={{ flex: 1, minWidth: 200, marginBottom: 0 }}
-                      value={row.value || ''}
-                      onChange={(e) => row.set((p) => ({ ...p, [c.id]: e.target.value }))}
-                      placeholder="Dán link ngoài (YouTube, Drive...) hoặc tải file lên →"
-                    />
-                    <label className="btn secondary" style={{ display: 'inline-flex', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                      {uploading === uploadKey ? 'Đang tải lên...' : '📤 Tải file lên'}
-                      <input
-                        type="file"
-                        style={{ display: 'none' }}
-                        disabled={uploading === uploadKey}
-                        onChange={(e) => handleUploadFile(c.id, c.title, row.field, e)}
-                      />
-                    </label>
-                  </div>
-                </div>
-              )
-            })}
-
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Tên bài</label>
+                <input
+                  value={newLessonTitle[c.id] || ''}
+                  onChange={(e) => setNewLessonTitle((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder='VD: "Bài 1: Mệnh đề"'
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Link bài giảng (bắt buộc)</label>
+                <input
+                  value={newLessonLink[c.id] || ''}
+                  onChange={(e) => setNewLessonLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder="https://..."
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Link file đề đính kèm (tùy chọn)</label>
+                <input
+                  value={newExamFileLink[c.id] || ''}
+                  onChange={(e) => setNewExamFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder="Link Google Drive / Word / PDF..."
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label>Link file lời giải tham khảo (tùy chọn)</label>
+                <input
+                  value={newSolutionFileLink[c.id] || ''}
+                  onChange={(e) => setNewSolutionFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                  placeholder="Link Google Drive / Word / PDF..."
+                />
+              </div>
+            </div>
             <button className="btn secondary" type="submit">
               + Thêm bài
             </button>
