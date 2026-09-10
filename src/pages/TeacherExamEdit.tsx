@@ -6,6 +6,7 @@ import { parseWordExam, DraftQuestionData } from '../utils/docxParser'
 import { handlePasteImage, fileToImgTag } from '../utils/imagePaste'
 import { Exam, MCQOption, Question, QuestionPart, ScoringMethod, TrueFalseOption } from '../types'
 import MathRenderer from '../components/MathRenderer'
+import { exportExamToWord, downloadBlob } from '../utils/exportExamToWord'
 
 interface DraftQuestion extends DraftQuestionData {
   dbId: string | null // id thật trong bảng questions nếu là câu đã có sẵn — null nếu là câu mới thêm khi sửa
@@ -53,6 +54,7 @@ export default function TeacherExamEdit() {
   const [previewMode, setPreviewMode] = useState(false)
   const [onlyFlagged, setOnlyFlagged] = useState(false)
   const [scrollToKey, setScrollToKey] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (!previewMode && scrollToKey) {
@@ -69,6 +71,26 @@ export default function TeacherExamEdit() {
   function jumpToEdit(key: string) {
     setScrollToKey(key)
     setPreviewMode(false)
+  }
+
+  async function handleExportWord() {
+    if (questions.length === 0) return
+    setExporting(true)
+    try {
+      const asQuestions = questions.map((q) => ({
+        part: q.part,
+        content_html: q.content_html,
+        options: q.options,
+        correct_answer: q.correct_answer,
+        points: q.points,
+      })) as unknown as Question[]
+      const blob = await exportExamToWord(title || 'De thi', asQuestions)
+      downloadBlob(blob, `${(title || 'de-thi').replace(/[\\/:*?"<>|]/g, '')}.docx`)
+    } catch (err: any) {
+      alert('Có lỗi khi xuất file Word: ' + (err.message || err))
+    } finally {
+      setExporting(false)
+    }
   }
 
   useEffect(() => {
@@ -235,6 +257,11 @@ export default function TeacherExamEdit() {
           <Link to={`/teacher/exams/${examId}/similar`} className="btn secondary">
             🔁 Sinh đề tương tự (đổi số)
           </Link>
+        )}
+        {questions.length > 0 && (
+          <button type="button" className="btn secondary" onClick={handleExportWord} disabled={exporting}>
+            {exporting ? '⏳ Đang xuất...' : '⬇ Xuất file Word (công thức thật)'}
+          </button>
         )}
       </div>
 

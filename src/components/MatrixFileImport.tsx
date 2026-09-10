@@ -1,15 +1,17 @@
 import { ChangeEvent, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { MatrixCell, QuestionDifficulty, QuestionPart } from '../types'
+import { parseMatrixWordFile } from '../utils/matrixWordParser'
 
 // ============================================================
-// TẢI MA TRẬN ĐỀ TỪ FILE EXCEL
+// TẢI MA TRẬN ĐỀ TỪ FILE EXCEL HOẶC WORD
 // ============================================================
 // Giáo viên thường đã có sẵn file ma trận đề (thường lập theo yêu cầu nhà
-// trường/tổ chuyên môn) — thay vì bắt gõ tay từng dòng trên web, cho phép
-// tải file Excel theo mẫu 4 cột: Chủ đề | Mức độ | Dạng câu | Số câu.
-// Parse xong sẽ CHÈN THÊM vào ma trận đang dựng trên trang (không xóa các
-// dòng đã có), giáo viên xem lại/sửa trước khi sinh đề.
+// trường/tổ chuyên môn, có thể là Excel HOẶC Word) — thay vì bắt gõ tay
+// từng dòng trên web, cho phép tải file theo mẫu 4 cột: Chủ đề | Mức độ |
+// Dạng câu | Số câu. Parse xong sẽ CHÈN THÊM vào ma trận đang dựng trên
+// trang (không xóa các dòng đã có), giáo viên xem lại/sửa trước khi sinh
+// đề.
 // ============================================================
 
 const DIFFICULTY_ALIASES: Record<string, QuestionDifficulty> = {
@@ -48,6 +50,36 @@ function matchTopic(raw: string, topics: string[]): string | null {
   // đỡ bắt giáo viên gõ đúng 100% dấu câu/khoảng trắng như trong hệ thống.
   const loose = topics.find((t) => normalize(t).includes(target) || target.includes(normalize(t)))
   return loose || null
+}
+
+/** Xử lý 1 danh sách dòng dữ liệu (đã bỏ dòng tiêu đề) — dùng chung cho cả Excel và Word. */
+function processDataRows(
+  dataRows: any[][],
+  topics: string[],
+  lineNoOffset: number,
+): { parsed: MatrixCell[]; problems: string[] } {
+  const parsed: MatrixCell[] = []
+  const problems: string[] = []
+
+  dataRows.forEach((r, i) => {
+    const [rawTopic, rawDifficulty, rawPart, rawCount] = r
+    if (!rawTopic && !rawDifficulty && !rawPart && !rawCount) return // dòng trống
+    const lineNo = i + lineNoOffset
+
+    const topic = matchTopic(String(rawTopic || ''), topics)
+    const difficulty = DIFFICULTY_ALIASES[normalize(String(rawDifficulty || ''))]
+    const part = PART_ALIASES[normalize(String(rawPart || ''))]
+    const count = Number(rawCount)
+
+    if (!topic) return problems.push(`Dòng ${lineNo}: không nhận ra chủ đề "${rawTopic}"`)
+    if (!difficulty) return problems.push(`Dòng ${lineNo}: mức độ "${rawDifficulty}" không hợp lệ`)
+    if (!part) return problems.push(`Dòng ${lineNo}: dạng câu "${rawPart}" không hợp lệ`)
+    if (!count || count <= 0) return problems.push(`Dòng ${lineNo}: số câu "${rawCount}" không hợp lệ`)
+
+    parsed.push({ topic, difficulty, part, count })
+  })
+
+  return { parsed, problems }
 }
 
 export default function MatrixFileImport({
@@ -94,7 +126,19 @@ export default function MatrixFileImport({
     XLSX.writeFile(wb, 'mau-ma-tran-de.xlsx')
   }
 
-  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+  function applyResult(parsed: MatrixCell[], problems: string[]) {
+    if (parsed.length > 0) onImport(parsed)
+    if (problems.length > 0) {
+      setError(`Bỏ qua ${problems.length} dòng lỗi:\n${problems.join('\n')}`)
+    } else {
+      setError(null)
+    }
+    if (parsed.length > 0) {
+      setNote(`Đã thêm ${parsed.length} dòng ma trận từ file — kiểm tra lại bên dưới.`)
+    }
+  }
+
+  async function handleExcelFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
@@ -106,38 +150,38 @@ export default function MatrixFileImport({
       const wb = XLSX.read(buf, { type: 'array' })
       const sheet = wb.Sheets[wb.SheetNames[0]]
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false })
-
       const dataRows = rows.slice(1) // bỏ dòng tiêu đề
-      const parsed: MatrixCell[] = []
-      const problems: string[] = []
-
-      dataRows.forEach((r, i) => {
-        const [rawTopic, rawDifficulty, rawPart, rawCount] = r
-        if (!rawTopic && !rawDifficulty && !rawPart && !rawCount) return // dòng trống
-        const lineNo = i + 2 // +2: bù dòng tiêu đề + index bắt đầu từ 0
-
-        const topic = matchTopic(String(rawTopic || ''), topics)
-        const difficulty = DIFFICULTY_ALIASES[normalize(String(rawDifficulty || ''))]
-        const part = PART_ALIASES[normalize(String(rawPart || ''))]
-        const count = Number(rawCount)
-
-        if (!topic) return problems.push(`Dòng ${lineNo}: không nhận ra chủ đề "${rawTopic}"`)
-        if (!difficulty) return problems.push(`Dòng ${lineNo}: mức độ "${rawDifficulty}" không hợp lệ`)
-        if (!part) return problems.push(`Dòng ${lineNo}: dạng câu "${rawPart}" không hợp lệ`)
-        if (!count || count <= 0) return problems.push(`Dòng ${lineNo}: số câu "${rawCount}" không hợp lệ`)
-
-        parsed.push({ topic, difficulty, part, count })
-      })
-
-      if (parsed.length > 0) onImport(parsed)
-      if (problems.length > 0) {
-        setError(`Bỏ qua ${problems.length} dòng lỗi:\n${problems.join('\n')}`)
-      }
-      if (parsed.length > 0) {
-        setNote(`Đã thêm ${parsed.length} dòng ma trận từ file — kiểm tra lại bên dưới.`)
-      }
+      const { parsed, problems } = processDataRows(dataRows, topics, 2)
+      applyResult(parsed, problems)
     } catch (err: any) {
       setError('Không đọc được file — hãy dùng đúng file mẫu Excel (.xlsx).')
+    }
+  }
+
+  async function handleWordFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setError(null)
+    setNote(null)
+
+    try {
+      const tables = await parseMatrixWordFile(file)
+      // Mỗi bảng tự bỏ dòng tiêu đề riêng (file có thể có nhiều bảng, ví
+      // dụ mỗi bảng 1 khối/1 phần) rồi gộp lại xử lý chung.
+      const allProblems: string[] = []
+      const allParsed: MatrixCell[] = []
+      let lineBase = 0
+      for (const table of tables) {
+        const dataRows = table.slice(1)
+        const { parsed, problems } = processDataRows(dataRows, topics, lineBase + 2)
+        allParsed.push(...parsed)
+        allProblems.push(...problems)
+        lineBase += table.length
+      }
+      applyResult(allParsed, allProblems)
+    } catch (err: any) {
+      setError(err.message || 'Không đọc được file Word — hãy chắc chắn ma trận được trình bày dưới dạng bảng.')
     }
   }
 
@@ -145,7 +189,7 @@ export default function MatrixFileImport({
     <div style={{ background: '#fafbfe', border: '1px dashed #cbd5e1', borderRadius: 8, padding: 12, marginBottom: 16 }}>
       <p style={{ fontSize: 13, margin: '0 0 8px' }}>
         Đã có sẵn file ma trận đề? Tải lên thay vì gõ tay từng dòng bên dưới (điền đúng 4 cột: Chủ đề, Mức độ, Dạng
-        câu, Số câu).
+        câu, Số câu) — nhận cả file Excel lẫn Word (bảng trong Word).
       </p>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <button type="button" className="btn secondary" onClick={downloadTemplate}>
@@ -153,11 +197,21 @@ export default function MatrixFileImport({
         </button>
         <label style={{ margin: 0 }}>
           <span className="btn" style={{ cursor: 'pointer' }}>
-            📤 Tải lên file ma trận (.xlsx)
+            📤 Tải file ma trận Excel (.xlsx)
           </span>
-          <input type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display: 'none' }} />
+          <input type="file" accept=".xlsx,.xls" onChange={handleExcelFile} style={{ display: 'none' }} />
+        </label>
+        <label style={{ margin: 0 }}>
+          <span className="btn" style={{ cursor: 'pointer' }}>
+            📤 Tải file ma trận Word (.docx)
+          </span>
+          <input type="file" accept=".docx" onChange={handleWordFile} style={{ display: 'none' }} />
         </label>
       </div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+        Với file Word: ma trận cần trình bày dưới dạng bảng (Insert &gt; Table trong Word), dòng đầu mỗi bảng là
+        tiêu đề cột, đúng thứ tự Chủ đề — Mức độ — Dạng câu — Số câu.
+      </p>
       {note && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>{note}</p>}
       {error && <pre style={{ fontSize: 12, color: 'var(--danger)', whiteSpace: 'pre-wrap', marginTop: 8 }}>{error}</pre>}
     </div>

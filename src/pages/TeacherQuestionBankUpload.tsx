@@ -7,6 +7,7 @@ import { classifyQuestions, ClassifiedQuestionData } from '../utils/classifyQues
 import { saveQuestionsToBank, BankDraftQuestion } from '../utils/questionBank'
 import { QuestionDifficulty } from '../types'
 import { getCurriculumTopics } from '../data/curriculumTopics'
+import QuestionBankBrowser from '../components/QuestionBankBrowser'
 import MathRenderer from '../components/MathRenderer'
 
 const DIFFICULTIES: QuestionDifficulty[] = ['Nhận biết', 'Thông hiểu', 'Vận dụng', 'Vận dụng cao']
@@ -250,6 +251,8 @@ export default function TeacherQuestionBankUpload() {
           </button>
         </div>
       )}
+
+      <QuestionBankBrowser />
     </div>
   )
 }

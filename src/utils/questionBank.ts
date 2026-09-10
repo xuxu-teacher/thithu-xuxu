@@ -50,6 +50,12 @@ export function bankCountKey(topic: string, difficulty: string, part: string) {
   return `${topic}|${difficulty}|${part}`
 }
 
+/** Xóa 1 câu khỏi kho câu hỏi. */
+export async function deleteBankQuestion(id: string): Promise<void> {
+  const { error } = await supabase.from('question_bank').delete().eq('id', id)
+  if (error) throw error
+}
+
 /** Sinh đề thi từ ma trận — exam đã được tạo trước (insert vào bảng `exams`) ở phía client. */
 export async function generateExamFromMatrix(
   examId: string,
@@ -67,14 +73,11 @@ export async function generateExamFromMatrix(
   return (data ?? []) as MatrixGenerateResult[]
 }
 
-/** Danh sách kho câu hỏi hiện có (xem/lọc) — dùng cho trang quản lý kho nếu cần sau này. */
-export async function listBankQuestions(teacherId: string, grade: string): Promise<QuestionBankItem[]> {
-  const { data, error } = await supabase
-    .from('question_bank')
-    .select('*')
-    .eq('teacher_id', teacherId)
-    .eq('grade', grade)
-    .order('created_at', { ascending: false })
+/** Danh sách kho câu hỏi hiện có (xem/lọc), không giới hạn theo khối — dùng cho màn hình xem lại kho. */
+export async function listBankQuestions(teacherId: string, grade?: string): Promise<QuestionBankItem[]> {
+  let query = supabase.from('question_bank').select('*').eq('teacher_id', teacherId).order('created_at', { ascending: false })
+  if (grade) query = query.eq('grade', grade)
+  const { data, error } = await query
   if (error) throw error
   return (data ?? []) as QuestionBankItem[]
 }
