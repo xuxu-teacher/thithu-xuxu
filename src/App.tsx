@@ -12,6 +12,8 @@ import TeacherExamResults from './pages/TeacherExamResults'
 import TeacherExamEdit from './pages/TeacherExamEdit'
 import TeacherAllExams from './pages/TeacherAllExams'
 import TeacherLessons from './pages/TeacherLessons'
+import TeacherQuestionBankUpload from './pages/TeacherQuestionBankUpload'
+import TeacherExamFromMatrix from './pages/TeacherExamFromMatrix'
 import StudentDashboard from './pages/StudentDashboard'
 import StudentLessons from './pages/StudentLessons'
 import StudentExamTake from './pages/StudentExamTake'
@@ -75,6 +77,22 @@ export default function App() {
           }
         />
 
+        <Route
+          path="/teacher/question-bank"
+          element={
+            <TeacherRoute>
+              <TeacherQuestionBankUpload />
+            </TeacherRoute>
+          }
+        />
+        <Route
+          path="/teacher/classes/:classId/exams/new-from-matrix"
+          element={
+            <TeacherRoute>
+              <TeacherExamFromMatrix />
+            </TeacherRoute>
+          }
+        />
         <Route
           path="/teacher/lessons"
           element={

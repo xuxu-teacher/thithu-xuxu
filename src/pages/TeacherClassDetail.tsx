@@ -191,6 +191,9 @@ export default function TeacherClassDetail() {
         </h2>
         <Link to={`/teacher/classes/${classId}/exams/new`} className="btn">
           + Tạo đề thi mới
+        </Link>{' '}
+        <Link to={`/teacher/classes/${classId}/exams/new-from-matrix`} className="btn secondary">
+          🧩 Sinh đề từ ma trận
         </Link>
       </div>
 

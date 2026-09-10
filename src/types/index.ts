@@ -2,6 +2,10 @@ export type QuestionPart = 'mcq' | 'true_false' | 'short_answer'
 export type ScoringMethod = 'equal_split' | 'ministry_partial'
 export type AttemptStatus = 'in_progress' | 'submitted' | 'missed' | 'disqualified'
 
+// 4 mức độ nhận thức theo chương trình GDPT 2018 (Bộ GDĐT) — dùng cho kho
+// câu hỏi và ma trận đề (chưa dùng ở luồng tạo đề thủ công hiện tại).
+export type QuestionDifficulty = 'Nhận biết' | 'Thông hiểu' | 'Vận dụng' | 'Vận dụng cao'
+
 export interface MCQOption {
   key: string // 'A' | 'B' | 'C' | 'D'
   html: string
@@ -103,6 +107,43 @@ export interface TeacherSession {
   id: string
   full_name: string
   email: string
+}
+
+// ---------- KHO CÂU HỎI (question_bank) + SINH ĐỀ THEO MA TRẬN ----------
+
+export interface QuestionBankItem {
+  id: string
+  teacher_id: string
+  grade: string
+  chapter_id: string | null
+  topic: string
+  difficulty: QuestionDifficulty
+  part: QuestionPart
+  content_html: string
+  image_url?: string | null
+  options: MCQOption[] | TrueFalseOption[] | null
+  correct_answer?: string | null
+  explanation_html?: string | null
+  points: number
+  source_file?: string | null
+  needs_review: boolean
+}
+
+/** Một ô trong ma trận đề: chủ đề × mức độ × dạng câu -> số lượng cần rút từ kho. */
+export interface MatrixCell {
+  topic: string
+  difficulty: QuestionDifficulty
+  part: QuestionPart
+  count: number
+}
+
+/** Kết quả RPC create_exam_from_matrix — dùng để cảnh báo nếu kho không đủ câu ở ô nào. */
+export interface MatrixGenerateResult {
+  topic: string
+  difficulty: QuestionDifficulty
+  part: QuestionPart
+  requested: number
+  inserted: number
 }
 
 export interface StudentSession {
