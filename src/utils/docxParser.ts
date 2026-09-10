@@ -493,7 +493,6 @@ function parsePart2(paragraphs: ParagraphData[], startIdx: number, endIdx: numbe
   let contentBuffer: string[] = []
   let inSolution = false
   let solutionBuffer: string[] = []
-  let trueStatements: Set<string> = new Set()
   let currentStmtIdx = -1
   let startedStatements = false
 
@@ -531,7 +530,7 @@ function parsePart2(paragraphs: ParagraphData[], startIdx: number, endIdx: numbe
       }
       collectingContent = true; inSolution = false
       contentBuffer = qM[2].trim() ? [qM[2].trim()] : []
-      solutionBuffer = []; trueStatements = new Set()
+      solutionBuffer = []
       currentStmtIdx = -1; startedStatements = false
       attachImages(currentQ, para.imageRIds)
       continue
@@ -549,17 +548,19 @@ function parsePart2(paragraphs: ParagraphData[], startIdx: number, endIdx: numbe
     if (stmtM && collectingContent) {
       if (q.options.length === 0 && contentBuffer.length > 0) { q.text = contentBuffer.join(' ').trim(); contentBuffer = [] }
       const letter = stmtM[1].toLowerCase()
-      q.options.push({ letter, text: (stmtM[2] || '').trim() })
+      // Gắn đúng/sai NGAY tại ý này (thuộc đúng câu hiện tại) — không dùng
+      // biến chung cho cả đề, tránh lẫn đáp án giữa các câu khác nhau.
+      ;(q.options as any).push({ letter, text: (stmtM[2] || '').trim(), isCorrect: para.hasUnderline })
       currentStmtIdx = q.options.length - 1
       startedStatements = true
-      if (para.hasUnderline) trueStatements.add(letter)
       continue
     }
 
     if (collectingContent && startedStatements && currentStmtIdx >= 0 && text && !inSolution) {
       if (!/^H(?:ình|inh)\s*\d+/i.test(text)) {
-        q.options[currentStmtIdx].text = (q.options[currentStmtIdx].text + ' ' + text).trim()
-        if (para.hasUnderline) trueStatements.add(q.options[currentStmtIdx].letter.toLowerCase())
+        const opt = q.options[currentStmtIdx] as any
+        opt.text = (opt.text + ' ' + text).trim()
+        if (para.hasUnderline) opt.isCorrect = true
       }
       attachImages(q, para.imageRIds)
       continue
@@ -572,13 +573,6 @@ function parsePart2(paragraphs: ParagraphData[], startIdx: number, endIdx: numbe
     if (para.imageRIds.length > 0 && !inSolution) attachImages(q, para.imageRIds)
   }
   flush()
-
-  // Gán correctAnswer dạng "a,c,d" theo các ý được gạch chân (đúng)
-  for (const q of questions) {
-    for (const opt of q.options) {
-      ;(opt as any).isCorrect = trueStatements.has(opt.letter.toLowerCase())
-    }
-  }
   questions.sort((a, b) => a.number - b.number)
   return questions
 }

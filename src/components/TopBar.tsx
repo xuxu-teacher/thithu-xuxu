@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import XuXuLogo from './XuXuLogo'
 
@@ -10,6 +10,14 @@ function initials(name: string) {
 export default function TopBar() {
   const { teacher, student, logoutTeacher, logoutStudent } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Chỉ hiện ĐÚNG 1 vai trò khớp với khu vực đang truy cập — tránh trường
+  // hợp cả tài khoản giáo viên (Supabase Auth) và học sinh (localStorage)
+  // cùng tồn tại trong trình duyệt (do dùng 2 cơ chế đăng nhập độc lập),
+  // khiến thanh menu hiện chồng chéo cả 2 vai trò cùng lúc.
+  const showTeacher = teacher && location.pathname.startsWith('/teacher')
+  const showStudent = student && location.pathname.startsWith('/student')
 
   return (
     <div className="topbar">
@@ -18,7 +26,7 @@ export default function TopBar() {
         Lớp Toán Xu Xu — Thi thử trực tuyến
       </Link>
       <div className="topbar-right">
-        {teacher && (
+        {showTeacher && (
           <>
             <Link to="/teacher/lessons" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
               Bài giảng
@@ -27,8 +35,8 @@ export default function TopBar() {
               Ngân hàng đề thi
             </Link>
             <span className="topbar-user">
-              <span className="avatar">{initials(teacher.full_name)}</span>
-              {teacher.full_name}
+              <span className="avatar">{initials(teacher!.full_name)}</span>
+              {teacher!.full_name}
             </span>
             <button
               className="link-btn"
@@ -41,7 +49,7 @@ export default function TopBar() {
             </button>
           </>
         )}
-        {student && (
+        {showStudent && (
           <>
             <Link to="/student/dashboard" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
               Bài thi
@@ -50,8 +58,8 @@ export default function TopBar() {
               Bài giảng
             </Link>
             <span className="topbar-user">
-              <span className="avatar">{initials(student.full_name)}</span>
-              {student.full_name} · {student.class_code}
+              <span className="avatar">{initials(student!.full_name)}</span>
+              {student!.full_name} · {student!.class_code}
             </span>
             <button
               className="link-btn"
