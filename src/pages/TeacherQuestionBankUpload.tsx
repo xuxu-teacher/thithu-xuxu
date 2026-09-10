@@ -10,10 +10,10 @@ import { getCurriculumTopics } from '../data/curriculumTopics'
 import MathRenderer from '../components/MathRenderer'
 
 const DIFFICULTIES: QuestionDifficulty[] = ['Nhận biết', 'Thông hiểu', 'Vận dụng', 'Vận dụng cao']
+const GRADES: ('10' | '11' | '12')[] = ['10', '11', '12']
 
 export default function TeacherQuestionBankUpload() {
   const { teacher } = useAuth()
-  const [grade, setGrade] = useState<'10' | '11' | '12'>('10')
 
   const [processing, setProcessing] = useState(false)
   const [progressNote, setProgressNote] = useState<string | null>(null)
@@ -23,8 +23,6 @@ export default function TeacherQuestionBankUpload() {
   const [error, setError] = useState<string | null>(null)
   const [savedCount, setSavedCount] = useState<number | null>(null)
   const cancelRef = useRef(false)
-
-  const topics = getCurriculumTopics(grade)
 
   function handleCancel() {
     cancelRef.current = true
@@ -51,8 +49,8 @@ export default function TeacherQuestionBankUpload() {
         const withKeys = result.questions.map((q) => ({ ...q, key: uuid() }))
 
         if (cancelRef.current) break
-        setProgressNote(`Đang phân loại chủ đề/mức độ cho ${withKeys.length} câu trong ${file.name}...`)
-        const classified = await classifyQuestions(withKeys, grade, topics)
+        setProgressNote(`Đang nhận diện khối lớp/chủ đề/mức độ cho ${withKeys.length} câu trong ${file.name}...`)
+        const classified = await classifyQuestions(withKeys)
         allParsed.push(classified)
         processedFiles.push(file)
       }
@@ -64,7 +62,7 @@ export default function TeacherQuestionBankUpload() {
       setProgressNote(
         cancelRef.current
           ? `Đã dừng — vẫn giữ lại ${merged.length} câu đã kịp xử lý từ ${processedFiles.length}/${list.length} file trước khi hủy. Rà lại bên dưới rồi bấm "Lưu vào kho".`
-          : `Xong — đã đọc và phân loại ${merged.length} câu từ ${list.length} file. Rà lại bên dưới (đặc biệt các câu có cờ ⚠) rồi bấm "Lưu vào kho".`,
+          : `Xong — đã đọc và phân loại ${merged.length} câu từ ${list.length} file. Rà lại bên dưới (đặc biệt các câu có cờ ⚠, kiểm tra kỹ cột Khối) rồi bấm "Lưu vào kho".`,
       )
     } catch (err: any) {
       setError(err.message || 'Có lỗi khi đọc/phân loại file.')
@@ -75,7 +73,18 @@ export default function TeacherQuestionBankUpload() {
   }
 
   function updateDraft(key: string, patch: Partial<BankDraftQuestion>) {
-    setDraft((prev) => prev.map((q) => (q.key === key ? { ...q, ...patch } : q)))
+    setDraft((prev) =>
+      prev.map((q) => {
+        if (q.key !== key) return q
+        const next = { ...q, ...patch }
+        // Đổi khối thì chủ đề cũ (của khối khác) không còn hợp lệ nữa — tự
+        // chọn lại chủ đề đầu tiên của khối mới để tránh lưu sai chủ đề.
+        if (patch.grade && patch.grade !== q.grade) {
+          next.topic = getCurriculumTopics(patch.grade)[0]
+        }
+        return next
+      }),
+    )
   }
 
   function removeDraft(key: string) {
@@ -91,7 +100,7 @@ export default function TeacherQuestionBankUpload() {
     setSaving(true)
     setError(null)
     try {
-      await saveQuestionsToBank(teacher!.id, grade, {}, draft)
+      await saveQuestionsToBank(teacher!.id, draft)
       setSavedCount(draft.length)
       setDraft([])
     } catch (err: any) {
@@ -114,31 +123,15 @@ export default function TeacherQuestionBankUpload() {
         <h2>📚 Kho câu hỏi — Tải đề lên & tự phân loại</h2>
         <p style={{ fontSize: 13 }}>
           Tải lên <b>nhiều file Word</b> cùng lúc (đề thi thử của nhiều năm/nhiều trường bạn sưu tầm hoặc tự soạn) —
-          hệ thống tự tách câu hỏi (dùng chung engine đọc Word đang dùng khi tạo đề), rồi dùng AI tự gán{' '}
-          <b>chủ đề</b> (theo đúng chương trình SGK Toán Kết nối tri thức của từng khối) và <b>mức độ nhận thức</b>{' '}
-          (Nhận biết / Thông hiểu / Vận dụng / Vận dụng cao). Không cần Google Drive hay bất kỳ dịch vụ trả phí nào — toàn bộ
-          câu hỏi được lưu ngay trong Supabase (miễn phí) của bạn, càng tải nhiều file, kho càng đa dạng.
+          hệ thống tự tách câu hỏi, rồi dùng AI tự nhận diện <b>khối lớp</b> (10/11/12 — không cần chọn trước,
+          AI tự đoán theo nội dung câu hỏi), <b>chủ đề</b> (theo đúng chương trình SGK Toán Kết nối tri thức) và{' '}
+          <b>mức độ nhận thức</b> (Nhận biết / Thông hiểu / Vận dụng / Vận dụng cao). Không cần Google Drive hay bất
+          kỳ dịch vụ trả phí nào — toàn bộ câu hỏi được lưu ngay trong Supabase (miễn phí) của bạn, càng tải nhiều
+          file, kho càng đa dạng.
         </p>
 
-        <label>Khối lớp</label>
-        <select value={grade} onChange={(e) => setGrade(e.target.value as '10' | '11' | '12')} style={{ maxWidth: 200 }}>
-          <option value="10">Khối 10</option>
-          <option value="11">Khối 11</option>
-          <option value="12">Khối 12</option>
-        </select>
-
-        {topics.length === 0 ? (
-          <p style={{ color: 'var(--danger)', fontSize: 13 }}>
-            Khối {grade} chưa có danh sách chủ đề — báo lỗi cho quản trị viên.
-          </p>
-        ) : (
-          <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            Chủ đề theo SGK Kết nối tri thức Khối {grade} ({topics.length} chương): {topics.join(', ')}
-          </p>
-        )}
-
-        <label>Chọn nhiều file Word (.docx)</label>
-        <input type="file" accept=".docx" multiple onChange={handleSelectFiles} disabled={topics.length === 0 || processing} />
+        <label>Chọn nhiều file Word (.docx) — có thể lẫn câu của nhiều khối khác nhau trong cùng 1 file</label>
+        <input type="file" accept=".docx" multiple onChange={handleSelectFiles} disabled={processing} />
         {processing && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <p style={{ whiteSpace: 'pre-line', margin: 0 }}>{progressNote}</p>
@@ -149,7 +142,7 @@ export default function TeacherQuestionBankUpload() {
         )}
         {!processing && progressNote && <div className="explanation" style={{ whiteSpace: 'pre-line' }}>{progressNote}</div>}
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-        {savedCount !== null && <div className="explanation">✅ Đã lưu {savedCount} câu vào kho câu hỏi Khối {grade}.</div>}
+        {savedCount !== null && <div className="explanation">✅ Đã lưu {savedCount} câu vào kho câu hỏi.</div>}
       </div>
 
       {draft.length > 0 && (
@@ -189,55 +182,68 @@ export default function TeacherQuestionBankUpload() {
             })}
           </div>
 
-          {visibleDraft.map((q) => (
-            <div className="question-block" key={q.key}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <b style={{ fontSize: 12.5, color: 'var(--muted)' }}>Nguồn: {q.sourceFile}</b>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {(q.needsTopicReview || q.needsReview) && <span className="badge warn">⚠ Cần rà lại</span>}
-                  <button type="button" className="btn danger" onClick={() => removeDraft(q.key)}>
-                    Xóa
-                  </button>
+          {visibleDraft.map((q) => {
+            const topicsForGrade = getCurriculumTopics(q.grade)
+            return (
+              <div className="question-block" key={q.key}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b style={{ fontSize: 12.5, color: 'var(--muted)' }}>Nguồn: {q.sourceFile}</b>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {(q.needsTopicReview || q.needsReview) && <span className="badge warn">⚠ Cần rà lại</span>}
+                    <button type="button" className="btn danger" onClick={() => removeDraft(q.key)}>
+                      Xóa
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="card" style={{ background: '#fafbfe' }}>
-                <MathRenderer html={q.content_html} block />
-              </div>
+                <div className="card" style={{ background: '#fafbfe' }}>
+                  <MathRenderer html={q.content_html} block />
+                </div>
 
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <label>Chủ đề</label>
-                  <select value={q.topic} onChange={(e) => updateDraft(q.key, { topic: e.target.value, needsTopicReview: false })}>
-                    {topics.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ flex: 1, minWidth: 180 }}>
-                  <label>Mức độ</label>
-                  <select
-                    value={q.difficulty}
-                    onChange={(e) => updateDraft(q.key, { difficulty: e.target.value as QuestionDifficulty, needsTopicReview: false })}
-                  >
-                    {DIFFICULTIES.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ minWidth: 140 }}>
-                  <label>Dạng câu hỏi</label>
-                  <p style={{ margin: 0, padding: '10px 0', fontSize: 13.5 }}>
-                    {q.part === 'mcq' ? 'Trắc nghiệm' : q.part === 'true_false' ? 'Đúng/Sai' : 'Trả lời ngắn'}
-                  </p>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 110 }}>
+                    <label>Khối</label>
+                    <select value={q.grade} onChange={(e) => updateDraft(q.key, { grade: e.target.value as '10' | '11' | '12', needsTopicReview: false })}>
+                      {GRADES.map((g) => (
+                        <option key={g} value={g}>
+                          Khối {g}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <label>Chủ đề</label>
+                    <select value={q.topic} onChange={(e) => updateDraft(q.key, { topic: e.target.value, needsTopicReview: false })}>
+                      {topicsForGrade.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <label>Mức độ</label>
+                    <select
+                      value={q.difficulty}
+                      onChange={(e) => updateDraft(q.key, { difficulty: e.target.value as QuestionDifficulty, needsTopicReview: false })}
+                    >
+                      {DIFFICULTIES.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ minWidth: 140 }}>
+                    <label>Dạng câu hỏi</label>
+                    <p style={{ margin: 0, padding: '10px 0', fontSize: 13.5 }}>
+                      {q.part === 'mcq' ? 'Trắc nghiệm' : q.part === 'true_false' ? 'Đúng/Sai' : 'Trả lời ngắn'}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
 
           <button className="btn" onClick={handleSaveAll} disabled={saving}>
             {saving ? 'Đang lưu...' : `Lưu ${draft.length} câu vào kho`}

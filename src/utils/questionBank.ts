@@ -6,16 +6,11 @@ export interface BankDraftQuestion extends ClassifiedQuestionData {
   sourceFile: string
 }
 
-/** Lưu các câu hỏi đã phân loại (từ classifyQuestions) vào kho câu hỏi. */
-export async function saveQuestionsToBank(
-  teacherId: string,
-  grade: '10' | '11' | '12',
-  _chapterIdByTopic: Record<string, string>,
-  questions: BankDraftQuestion[],
-): Promise<void> {
+/** Lưu các câu hỏi đã phân loại (từ classifyQuestions) vào kho câu hỏi — khối lớp lấy theo từng câu (q.grade), AI đã tự nhận diện, không còn cố định 1 khối cho cả lượt tải lên. */
+export async function saveQuestionsToBank(teacherId: string, questions: BankDraftQuestion[]): Promise<void> {
   const rows = questions.map((q) => ({
     teacher_id: teacherId,
-    grade,
+    grade: q.grade,
     chapter_id: null,
     topic: q.topic,
     difficulty: q.difficulty,

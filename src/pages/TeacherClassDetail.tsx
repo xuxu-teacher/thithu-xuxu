@@ -189,11 +189,8 @@ export default function TeacherClassDetail() {
         <h2>
           Lớp {classRoom.class_name} — <span className="badge">{classRoom.class_code}</span>
         </h2>
-        <Link to={`/teacher/classes/${classId}/exams/new`} className="btn">
-          + Tạo đề thi mới
-        </Link>{' '}
-        <Link to={`/teacher/classes/${classId}/exams/new-from-matrix`} className="btn secondary">
-          🧩 Sinh đề từ ma trận
+        <Link to={`/teacher/classes/${classId}/exams/new-hub`} className="btn">
+          + Tạo đề thi
         </Link>{' '}
         <Link to={`/teacher/classes/${classId}/practice/new`} className="btn secondary">
           📝 Tạo đề thi thử
