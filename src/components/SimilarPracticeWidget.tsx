@@ -36,9 +36,16 @@ export default function SimilarPracticeWidget({
 
   if (!variant) {
     return (
-      <button type="button" className="btn secondary" onClick={generate} disabled={loading} style={{ marginTop: 8 }}>
-        {loading ? 'Đang tạo câu tương tự...' : '🔁 Luyện câu tương tự (đổi số)'}
-      </button>
+      <div style={{ marginTop: 8 }}>
+        <button type="button" className="btn secondary" onClick={generate} disabled={loading}>
+          {loading ? 'Đang tạo câu tương tự...' : '🔁 Luyện câu tương tự (đổi số)'}
+        </button>
+        {error && (
+          <p style={{ color: 'var(--danger)', fontSize: 12.5, marginTop: 6 }}>
+            {error}
+          </p>
+        )}
+      </div>
     )
   }
 

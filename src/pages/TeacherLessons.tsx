@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
 import { Chapter, Lesson } from '../types'
+import { uploadLessonFile } from '../utils/uploadLessonFile'
 
 export default function TeacherLessons() {
   const { teacher } = useAuth()
@@ -15,6 +16,7 @@ export default function TeacherLessons() {
   const [newLessonLink, setNewLessonLink] = useState<Record<string, string>>({})
   const [newExamFileLink, setNewExamFileLink] = useState<Record<string, string>>({})
   const [newSolutionFileLink, setNewSolutionFileLink] = useState<Record<string, string>>({})
+  const [uploadingField, setUploadingField] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function loadChapters() {
@@ -100,6 +102,26 @@ export default function TeacherLessons() {
     loadChapters()
   }
 
+  async function handleUploadFile(
+    chapterId: string,
+    field: 'link' | 'exam' | 'solution',
+    file: File,
+  ) {
+    const fieldKey = `${chapterId}:${field}`
+    setUploadingField(fieldKey)
+    setError(null)
+    try {
+      const url = await uploadLessonFile(file, teacher!.id)
+      if (field === 'link') setNewLessonLink((p) => ({ ...p, [chapterId]: url }))
+      else if (field === 'exam') setNewExamFileLink((p) => ({ ...p, [chapterId]: url }))
+      else setNewSolutionFileLink((p) => ({ ...p, [chapterId]: url }))
+    } catch (err: any) {
+      setError(err.message || 'Có lỗi khi tải file lên.')
+    } finally {
+      setUploadingField(null)
+    }
+  }
+
   return (
     <div className="container">
       <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
@@ -179,30 +201,63 @@ export default function TeacherLessons() {
                 />
               </div>
               <div style={{ flex: 1, minWidth: 180 }}>
-                <label>Link bài giảng (bắt buộc)</label>
-                <input
-                  value={newLessonLink[c.id] || ''}
-                  onChange={(e) => setNewLessonLink((p) => ({ ...p, [c.id]: e.target.value }))}
-                  placeholder="https://..."
-                />
+                <label>Link bài giảng (bắt buộc) — dán link hoặc tải file trực tiếp</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    style={{ flex: 1, marginBottom: 0 }}
+                    value={newLessonLink[c.id] || ''}
+                    onChange={(e) => setNewLessonLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                    placeholder="https://... hoặc bấm Tải file"
+                  />
+                  <label className="btn secondary" style={{ cursor: 'pointer', margin: 0, whiteSpace: 'nowrap' }}>
+                    {uploadingField === `${c.id}:link` ? '⏳...' : '📤 Tải file'}
+                    <input
+                      type="file"
+                      style={{ display: 'none' }}
+                      onChange={(e) => e.target.files?.[0] && handleUploadFile(c.id, 'link', e.target.files[0])}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 180 }}>
-                <label>Link file đề đính kèm (tùy chọn)</label>
-                <input
-                  value={newExamFileLink[c.id] || ''}
-                  onChange={(e) => setNewExamFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
-                  placeholder="Link Google Drive / Word / PDF..."
-                />
+                <label>Link file đề đính kèm (tùy chọn) — dán link hoặc tải file trực tiếp</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    style={{ flex: 1, marginBottom: 0 }}
+                    value={newExamFileLink[c.id] || ''}
+                    onChange={(e) => setNewExamFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                    placeholder="Link hoặc bấm Tải file"
+                  />
+                  <label className="btn secondary" style={{ cursor: 'pointer', margin: 0, whiteSpace: 'nowrap' }}>
+                    {uploadingField === `${c.id}:exam` ? '⏳...' : '📤 Tải file'}
+                    <input
+                      type="file"
+                      style={{ display: 'none' }}
+                      onChange={(e) => e.target.files?.[0] && handleUploadFile(c.id, 'exam', e.target.files[0])}
+                    />
+                  </label>
+                </div>
               </div>
               <div style={{ flex: 1, minWidth: 180 }}>
-                <label>Link file lời giải tham khảo (tùy chọn)</label>
-                <input
-                  value={newSolutionFileLink[c.id] || ''}
-                  onChange={(e) => setNewSolutionFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
-                  placeholder="Link Google Drive / Word / PDF..."
-                />
+                <label>Link file lời giải tham khảo (tùy chọn) — dán link hoặc tải file trực tiếp</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    style={{ flex: 1, marginBottom: 0 }}
+                    value={newSolutionFileLink[c.id] || ''}
+                    onChange={(e) => setNewSolutionFileLink((p) => ({ ...p, [c.id]: e.target.value }))}
+                    placeholder="Link hoặc bấm Tải file"
+                  />
+                  <label className="btn secondary" style={{ cursor: 'pointer', margin: 0, whiteSpace: 'nowrap' }}>
+                    {uploadingField === `${c.id}:solution` ? '⏳...' : '📤 Tải file'}
+                    <input
+                      type="file"
+                      style={{ display: 'none' }}
+                      onChange={(e) => e.target.files?.[0] && handleUploadFile(c.id, 'solution', e.target.files[0])}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
             <button className="btn secondary" type="submit">
