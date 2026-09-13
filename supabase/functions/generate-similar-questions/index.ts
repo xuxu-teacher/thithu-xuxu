@@ -42,7 +42,33 @@ interface VariantResult {
 
 const BATCH_SIZE = 8 // ít hơn classify-questions vì mỗi câu giờ cần AI "giải toán", output dài hơn nhiều
 
+// Ảnh minh họa (hình vẽ, base64) không cần đưa cho AI xử lý — AI không thể
+// "vẽ lại" hình theo số liệu mới, và base64 rất nặng (dễ vượt giới hạn độ
+// dài request, làm câu có hình luôn báo lỗi). Thay bằng placeholder ngắn
+// gọn trước khi gửi, dặn AI giữ nguyên placeholder, rồi khôi phục lại ảnh
+// gốc theo đúng vị trí sau khi nhận kết quả.
+function stripImages(html: string): { stripped: string; images: string[] } {
+  const images: string[] = []
+  const stripped = html.replace(/<img\b[^>]*>/g, (tag) => {
+    images.push(tag)
+    return `[HINH_${images.length}]`
+  })
+  return { stripped, images }
+}
+
+function restoreImages(html: string, images: string[]): string {
+  let result = html
+  images.forEach((tag, i) => {
+    result = result.split(`[HINH_${i + 1}]`).join(tag)
+  })
+  return result
+}
+
 async function generateBatch(batch: IncomingQuestion[], apiKey: string): Promise<VariantResult[]> {
+  // Tách ảnh ra khỏi từng câu trước khi đưa vào prompt — xem stripImages() ở trên.
+  const imagesByIndex = batch.map((q) => stripImages(q.content_html).images)
+  const strippedContents = batch.map((q) => stripImages(q.content_html).stripped)
+
   const questionsBlock = batch
     .map((q, i) => {
       const optionsText =
@@ -51,7 +77,7 @@ async function generateBatch(batch: IncomingQuestion[], apiKey: string): Promise
           : q.part === 'true_false'
           ? `Các ý Đúng/Sai (JSON): ${JSON.stringify(q.options)}`
           : `Đáp án đúng hiện tại: ${q.correct_answer}`
-      return `[${i}] (dạng: ${q.part})\nNội dung (HTML): ${q.content_html}\n${optionsText}`
+      return `[${i}] (dạng: ${q.part})\nNội dung (HTML): ${strippedContents[i]}\n${optionsText}`
     })
     .join('\n\n')
 
@@ -66,6 +92,7 @@ QUY TẮC BẮT BUỘC cho mỗi câu:
 6. Với câu Đúng/Sai (true_false): giữ đúng số ý và key (a/b/c/d), tính lại đúng/sai cho từng ý theo số liệu mới.
 7. Với câu trả lời ngắn (short_answer): tính lại đáp số mới cho khớp số liệu mới.
 8. Viết lại lời giải chi tiết (explanation_html) đầy đủ theo số liệu mới, giữ định dạng HTML/LaTeX như bản gốc.
+9. Nếu trong đề có các placeholder dạng [HINH_1], [HINH_2]... (đại diện cho hình vẽ minh họa) — PHẢI giữ nguyên y hệt các placeholder này ở đúng vị trí, không xóa, không đổi số, không diễn giải thành chữ.
 
 Với mỗi câu đánh số [0], [1], ... hãy trả về đúng một dòng JSON, KHÔNG giải thích thêm, KHÔNG markdown, đúng định dạng mảng JSON sau:
 [{"i":0,"content_html":"...","options":..., "correct_answer":"...", "explanation_html":"...", "changed_numbers":true}, ...]
@@ -135,7 +162,8 @@ Với mỗi câu đánh số [0], [1], ... hãy trả về đúng một dòng JS
     }
     return {
       key: q.key,
-      content_html: item.content_html || q.content_html,
+      // Khôi phục ảnh gốc đúng vị trí placeholder [HINH_n] AI đã giữ lại.
+      content_html: restoreImages(item.content_html || q.content_html, imagesByIndex[i]),
       options: item.options ?? q.options,
       correct_answer: item.correct_answer ?? q.correct_answer,
       explanation_html: item.explanation_html || q.explanation_html || '',

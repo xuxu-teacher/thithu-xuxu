@@ -43,7 +43,14 @@ export async function classifyQuestions(questions: DraftQuestionData[]): Promise
   })
 
   if (error) {
-    throw new Error(`Không phân loại được câu hỏi: ${error.message}`)
+    let detail = error.message
+    try {
+      const body = await error.context?.json()
+      if (body?.error) detail = body.error
+    } catch {
+      /* giữ nguyên detail mặc định nếu không đọc được body lỗi */
+    }
+    throw new Error(`Không phân loại được câu hỏi: ${detail}`)
   }
 
   const results: ClassifyApiResult[] = data?.classifications ?? []

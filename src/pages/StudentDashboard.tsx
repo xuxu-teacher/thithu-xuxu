@@ -33,6 +33,7 @@ export default function StudentDashboard() {
   const { student } = useAuth()
   const [rows, setRows] = useState<Row[]>([])
   const [progress, setProgress] = useState<ProgressRow[]>([])
+  const [tuitionPaid, setTuitionPaid] = useState<boolean | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -44,6 +45,9 @@ export default function StudentDashboard() {
 
       const { data: prog } = await supabase.rpc('get_student_progress', { p_student_id: student!.id })
       setProgress((prog as ProgressRow[]) || [])
+
+      const { data: me } = await supabase.from('students').select('tuition_paid').eq('id', student!.id).single()
+      setTuitionPaid(me?.tuition_paid ?? null)
     }
     load()
   }, [student])
@@ -63,6 +67,15 @@ export default function StudentDashboard() {
         <p style={{ margin: 0, fontSize: 13 }}>Muốn luyện thêm tự do, làm bao nhiêu lần cũng được?</p>
         <Link to="/student/practice" className="btn secondary">📝 Đề thi thử</Link>
       </div>
+
+      {tuitionPaid !== null && (
+        <div className="card" style={{ background: tuitionPaid ? '#f0fdf4' : '#fff7ed' }}>
+          <p style={{ margin: 0 }}>
+            💰 Học phí: <span className={`badge ${tuitionPaid ? 'correct' : 'warn'}`}>{tuitionPaid ? 'Đã nộp' : 'Chưa nộp'}</span>
+            {!tuitionPaid && <span style={{ fontSize: 12.5, color: 'var(--muted)', marginLeft: 8 }}>Liên hệ giáo viên nếu có thắc mắc.</span>}
+          </p>
+        </div>
+      )}
 
       {scale10.length > 0 && (
         <div className="card">

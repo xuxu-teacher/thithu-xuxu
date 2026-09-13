@@ -84,6 +84,7 @@ export interface Student {
   student_code: string
   full_name: string
   phone?: string | null
+  tuition_paid?: boolean
 }
 
 export interface Attempt {

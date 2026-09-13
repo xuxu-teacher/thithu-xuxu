@@ -45,7 +45,7 @@ export default function TeacherClassDetail() {
     setClassRoom(c as ClassRoom)
     const { data: s } = await supabase
       .from('students')
-      .select('id, class_id, student_code, full_name, phone')
+      .select('id, class_id, student_code, full_name, phone, tuition_paid')
       .eq('class_id', classId)
       .order('student_code')
     setStudents((s as Student[]) || [])
@@ -177,6 +177,21 @@ export default function TeacherClassDetail() {
     loadAll()
   }
 
+  async function handleDeleteAllStudents() {
+    if (students.length === 0) return
+    if (!window.confirm(`XÓA TOÀN BỘ ${students.length} học sinh khỏi lớp "${classRoom?.class_name}"? Toàn bộ kết quả thi của cả lớp cũng sẽ bị xóa theo. Hành động KHÔNG THỂ HOÀN TÁC.`)) return
+    if (!window.confirm('Xác nhận lần nữa — chắc chắn xóa hết toàn bộ học sinh trong lớp này?')) return
+    const { error } = await supabase.from('students').delete().eq('class_id', classId)
+    if (error) { alert('Lỗi khi xóa: ' + error.message); return }
+    loadAll()
+  }
+
+  async function handleToggleTuition(studentId: string, paid: boolean) {
+    setStudents((prev) => prev.map((s) => (s.id === studentId ? { ...s, tuition_paid: paid } : s)))
+    const { error } = await supabase.from('students').update({ tuition_paid: paid }).eq('id', studentId)
+    if (error) alert('Lỗi khi cập nhật học phí: ' + error.message)
+  }
+
   if (!classRoom) return <div className="container">Đang tải...</div>
 
   return (
@@ -244,7 +259,14 @@ export default function TeacherClassDetail() {
               <th>Mã học sinh</th>
               <th>Họ và tên</th>
               <th>SĐT</th>
-              <th></th>
+              <th>Học phí</th>
+              <th>
+                {students.length > 0 && (
+                  <button className="btn danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={handleDeleteAllStudents}>
+                    🗑 Xóa toàn bộ ({students.length})
+                  </button>
+                )}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -254,6 +276,19 @@ export default function TeacherClassDetail() {
                 <td>{s.full_name}</td>
                 <td>{s.phone || '-'}</td>
                 <td>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto', marginBottom: 0 }}
+                      checked={!!s.tuition_paid}
+                      onChange={(e) => handleToggleTuition(s.id, e.target.checked)}
+                    />
+                    <span className={`badge ${s.tuition_paid ? 'correct' : 'warn'}`}>
+                      {s.tuition_paid ? 'Đã nộp' : 'Chưa nộp'}
+                    </span>
+                  </label>
+                </td>
+                <td>
                   <button className="btn danger" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => handleDeleteStudent(s.id, s.full_name)}>
                     Xóa
                   </button>
@@ -262,7 +297,7 @@ export default function TeacherClassDetail() {
             ))}
             {students.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                <td colSpan={5} style={{ color: 'var(--muted)' }}>
                   Chưa có học sinh nào.
                 </td>
               </tr>

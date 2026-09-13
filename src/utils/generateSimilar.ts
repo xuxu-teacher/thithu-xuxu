@@ -23,7 +23,20 @@ export async function generateSimilarQuestions(
   const { data, error } = await supabase.functions.invoke('generate-similar-questions', {
     body: { questions: withKeys },
   })
-  if (error) throw new Error(`Không sinh được đề tương tự: ${error.message}`)
+  if (error) {
+    // supabase-js chỉ trả thông báo chung "non-2xx status code" — đọc thẳng
+    // nội dung lỗi thật (JSON {"error":"..."}) mà Edge Function đã trả về
+    // để người dùng (và cả tôi khi debug qua ảnh chụp) thấy nguyên nhân
+    // thật thay vì phải mò qua Supabase Dashboard.
+    let detail = error.message
+    try {
+      const body = await error.context?.json()
+      if (body?.error) detail = body.error
+    } catch {
+      /* giữ nguyên detail mặc định nếu không đọc được body lỗi */
+    }
+    throw new Error(`Không sinh được đề tương tự: ${detail}`)
+  }
 
   const variants: (SimilarVariant & { key: string })[] = data?.variants ?? []
   const byKey = new Map(variants.map((v) => [v.key, v]))
