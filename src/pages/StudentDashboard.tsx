@@ -46,8 +46,8 @@ export default function StudentDashboard() {
       const { data: prog } = await supabase.rpc('get_student_progress', { p_student_id: student!.id })
       setProgress((prog as ProgressRow[]) || [])
 
-      const { data: me } = await supabase.from('students').select('tuition_paid').eq('id', student!.id).single()
-      setTuitionPaid(me?.tuition_paid ?? null)
+      const { data: me } = await supabase.rpc('get_my_tuition_status', { p_student_id: student!.id })
+      setTuitionPaid(me ?? null)
     }
     load()
   }, [student])
