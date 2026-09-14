@@ -5,13 +5,21 @@ import { useAuth } from '../context/AuthContext'
 import { parseWordExam } from '../utils/docxParser'
 import { classifyQuestions, ClassifiedQuestionData } from '../utils/classifyQuestions'
 import { saveQuestionsToBank, BankDraftQuestion } from '../utils/questionBank'
-import { QuestionDifficulty } from '../types'
+import { handlePasteImage, fileToImgTag } from '../utils/imagePaste'
+import { MCQOption, QuestionDifficulty, QuestionPart, TrueFalseOption } from '../types'
 import { getCurriculumTopics } from '../data/curriculumTopics'
 import QuestionBankBrowser from '../components/QuestionBankBrowser'
 import MathRenderer from '../components/MathRenderer'
 
 const DIFFICULTIES: QuestionDifficulty[] = ['Nhận biết', 'Thông hiểu', 'Vận dụng', 'Vận dụng cao']
 const GRADES: ('10' | '11' | '12')[] = ['10', '11', '12']
+
+function emptyMcq(): MCQOption[] {
+  return ['A', 'B', 'C', 'D'].map((k) => ({ key: k, html: '' }))
+}
+function emptyTF(): TrueFalseOption[] {
+  return ['a', 'b', 'c', 'd'].map((k) => ({ key: k, html: '', correct: false }))
+}
 
 export default function TeacherQuestionBankUpload() {
   const { teacher } = useAuth()
@@ -86,6 +94,14 @@ export default function TeacherQuestionBankUpload() {
         return next
       }),
     )
+  }
+
+  function changePart(key: string, part: QuestionPart) {
+    updateDraft(key, {
+      part,
+      options: part === 'mcq' ? emptyMcq() : part === 'true_false' ? emptyTF() : [],
+      correct_answer: '',
+    })
   }
 
   function removeDraft(key: string) {
@@ -197,7 +213,30 @@ export default function TeacherQuestionBankUpload() {
                   </div>
                 </div>
 
+                <label>Nội dung câu hỏi</label>
+                <textarea
+                  rows={3}
+                  value={q.content_html}
+                  onChange={(e) => updateDraft(q.key, { content_html: e.target.value })}
+                  onPaste={(e) => handlePasteImage(e, (img) => updateDraft(q.key, { content_html: q.content_html + img }))}
+                />
+                <label className="btn secondary" style={{ display: 'inline-flex', cursor: 'pointer', marginBottom: 12 }}>
+                  📷 Chèn ảnh
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const img = await fileToImgTag(file)
+                      updateDraft(q.key, { content_html: q.content_html + img })
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
                 <div className="card" style={{ background: '#fafbfe' }}>
+                  <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước:</b>
                   <MathRenderer html={q.content_html} block />
                 </div>
 
@@ -235,13 +274,89 @@ export default function TeacherQuestionBankUpload() {
                       ))}
                     </select>
                   </div>
-                  <div style={{ minWidth: 140 }}>
+                  <div style={{ minWidth: 160 }}>
                     <label>Dạng câu hỏi</label>
-                    <p style={{ margin: 0, padding: '10px 0', fontSize: 13.5 }}>
-                      {q.part === 'mcq' ? 'Trắc nghiệm' : q.part === 'true_false' ? 'Đúng/Sai' : 'Trả lời ngắn'}
-                    </p>
+                    <select value={q.part} onChange={(e) => changePart(q.key, e.target.value as QuestionPart)}>
+                      <option value="mcq">Trắc nghiệm 4 đáp án</option>
+                      <option value="true_false">Đúng / Sai (4 ý)</option>
+                      <option value="short_answer">Trả lời ngắn</option>
+                    </select>
                   </div>
                 </div>
+
+                {q.part === 'mcq' && (
+                  <>
+                    {(q.options as MCQOption[]).map((opt, idx) => (
+                      <div key={opt.key} className="tf-row">
+                        <b>{opt.key}.</b>
+                        <input
+                          style={{ flex: 1, marginBottom: 0 }}
+                          value={opt.html}
+                          onChange={(e) => {
+                            const next = [...(q.options as MCQOption[])]
+                            next[idx] = { ...next[idx], html: e.target.value }
+                            updateDraft(q.key, { options: next })
+                          }}
+                        />
+                      </div>
+                    ))}
+                    <label>Đáp án đúng</label>
+                    <select value={q.correct_answer} onChange={(e) => updateDraft(q.key, { correct_answer: e.target.value })}>
+                      {['A', 'B', 'C', 'D'].map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {q.part === 'true_false' && (
+                  <>
+                    {(q.options as TrueFalseOption[]).map((opt, idx) => (
+                      <div key={opt.key} className="tf-row">
+                        <b>{opt.key})</b>
+                        <input
+                          style={{ flex: 1, marginBottom: 0 }}
+                          value={opt.html}
+                          onChange={(e) => {
+                            const next = [...(q.options as TrueFalseOption[])]
+                            next[idx] = { ...next[idx], html: e.target.value }
+                            updateDraft(q.key, { options: next })
+                          }}
+                        />
+                        <label style={{ margin: 0, display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <input
+                            type="checkbox"
+                            style={{ width: 'auto', marginBottom: 0 }}
+                            checked={opt.correct}
+                            onChange={(e) => {
+                              const next = [...(q.options as TrueFalseOption[])]
+                              next[idx] = { ...next[idx], correct: e.target.checked }
+                              updateDraft(q.key, { options: next })
+                            }}
+                          />
+                          Đúng
+                        </label>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {q.part === 'short_answer' && (
+                  <>
+                    <label>Đáp án đúng</label>
+                    <input value={q.correct_answer} onChange={(e) => updateDraft(q.key, { correct_answer: e.target.value })} />
+                  </>
+                )}
+
+                <label>Lời giải chi tiết</label>
+                <textarea
+                  rows={2}
+                  value={q.explanation_html || ''}
+                  onChange={(e) => updateDraft(q.key, { explanation_html: e.target.value })}
+                  onPaste={(e) => handlePasteImage(e, (img) => updateDraft(q.key, { explanation_html: (q.explanation_html || '') + img }))}
+                />
               </div>
             )
           })}
