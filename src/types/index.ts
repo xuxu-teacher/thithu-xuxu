@@ -110,6 +110,18 @@ export interface TeacherSession {
   email: string
 }
 
+// ---------- QUẢN LÝ GIẤY TỜ SỔ SÁCH DẠY THÊM ----------
+
+export interface TeacherDocument {
+  id: string
+  teacher_id: string
+  category: string
+  file_name: string
+  storage_path: string
+  note?: string | null
+  created_at: string
+}
+
 // ---------- KHO CÂU HỎI (question_bank) + SINH ĐỀ THEO MA TRẬN ----------
 
 export interface QuestionBankItem {

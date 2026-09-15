@@ -9,6 +9,7 @@ import { handlePasteImage, fileToImgTag } from '../utils/imagePaste'
 import { MCQOption, QuestionDifficulty, QuestionPart, TrueFalseOption } from '../types'
 import { getCurriculumTopics } from '../data/curriculumTopics'
 import QuestionBankBrowser from '../components/QuestionBankBrowser'
+import QuestionFullPreview from '../components/QuestionFullPreview'
 import MathRenderer from '../components/MathRenderer'
 
 const DIFFICULTIES: QuestionDifficulty[] = ['Nhận biết', 'Thông hiểu', 'Vận dụng', 'Vận dụng cao']
@@ -31,6 +32,7 @@ export default function TeacherQuestionBankUpload() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedCount, setSavedCount] = useState<number | null>(null)
+  const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({})
   const cancelRef = useRef(false)
 
   function handleCancel() {
@@ -207,13 +209,24 @@ export default function TeacherQuestionBankUpload() {
                   <b style={{ fontSize: 12.5, color: 'var(--muted)' }}>Nguồn: {q.sourceFile}</b>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {(q.needsTopicReview || q.needsReview) && <span className="badge warn">⚠ Cần rà lại</span>}
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => setPreviewOpen((p) => ({ ...p, [q.key]: !p[q.key] }))}
+                    >
+                      {previewOpen[q.key] ? '✏️ Sửa' : '👁 Xem đầy đủ'}
+                    </button>
                     <button type="button" className="btn danger" onClick={() => removeDraft(q.key)}>
                       Xóa
                     </button>
                   </div>
                 </div>
 
-                <label>Nội dung câu hỏi</label>
+                {previewOpen[q.key] ? (
+                  <QuestionFullPreview question={q} />
+                ) : (
+                  <>
+                    <label>Nội dung câu hỏi</label>
                 <textarea
                   rows={3}
                   value={q.content_html}
@@ -357,6 +370,8 @@ export default function TeacherQuestionBankUpload() {
                   onChange={(e) => updateDraft(q.key, { explanation_html: e.target.value })}
                   onPaste={(e) => handlePasteImage(e, (img) => updateDraft(q.key, { explanation_html: (q.explanation_html || '') + img }))}
                 />
+                  </>
+                )}
               </div>
             )
           })}

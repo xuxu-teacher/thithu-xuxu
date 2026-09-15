@@ -4,6 +4,7 @@ import { listBankQuestions, deleteBankQuestion } from '../utils/questionBank'
 import { getCurriculumTopics } from '../data/curriculumTopics'
 import { QuestionBankItem, QuestionDifficulty, QuestionPart } from '../types'
 import MathRenderer from './MathRenderer'
+import QuestionFullPreview from './QuestionFullPreview'
 
 const DIFFICULTIES: QuestionDifficulty[] = ['Nhận biết', 'Thông hiểu', 'Vận dụng', 'Vận dụng cao']
 const PARTS: { value: QuestionPart; label: string }[] = [
@@ -22,6 +23,7 @@ export default function QuestionBankBrowser() {
   const [topicFilter, setTopicFilter] = useState('all')
   const [difficultyFilter, setDifficultyFilter] = useState<'all' | QuestionDifficulty>('all')
   const [partFilter, setPartFilter] = useState<'all' | QuestionPart>('all')
+  const [fullOpen, setFullOpen] = useState<Record<string, boolean>>({})
 
   async function reload() {
     setLoading(true)
@@ -146,12 +148,22 @@ export default function QuestionBankBrowser() {
                       <span className="badge">{PARTS.find((p) => p.value === q.part)?.label}</span>
                       {q.needs_review && <span className="badge warn">⚠ Cần rà lại</span>}
                     </div>
-                    <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => handleDelete(q.id)}>
-                      Xóa
-                    </button>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        style={{ padding: '4px 10px' }}
+                        onClick={() => setFullOpen((p) => ({ ...p, [q.id]: !p[q.id] }))}
+                      >
+                        {fullOpen[q.id] ? '▲ Thu gọn' : '👁 Xem đầy đủ'}
+                      </button>
+                      <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => handleDelete(q.id)}>
+                        Xóa
+                      </button>
+                    </div>
                   </div>
                   <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0' }}>Nguồn: {q.source_file || '—'}</p>
-                  <MathRenderer html={q.content_html} />
+                  {fullOpen[q.id] ? <QuestionFullPreview question={q} /> : <MathRenderer html={q.content_html} />}
                 </div>
               ))}
 

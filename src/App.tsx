@@ -15,6 +15,7 @@ import TeacherLessons from './pages/TeacherLessons'
 import TeacherQuestionBankUpload from './pages/TeacherQuestionBankUpload'
 import TeacherExamFromMatrix from './pages/TeacherExamFromMatrix'
 import TeacherExamCreateHub from './pages/TeacherExamCreateHub'
+import TeacherManagement from './pages/TeacherManagement'
 import TeacherExamSimilar from './pages/TeacherExamSimilar'
 import TeacherPracticeExamCreate from './pages/TeacherPracticeExamCreate'
 import StudentPracticeList from './pages/StudentPracticeList'
@@ -87,6 +88,14 @@ export default function App() {
           element={
             <TeacherRoute>
               <TeacherExamCreateHub />
+            </TeacherRoute>
+          }
+        />
+        <Route
+          path="/teacher/management"
+          element={
+            <TeacherRoute>
+              <TeacherManagement />
             </TeacherRoute>
           }
         />
