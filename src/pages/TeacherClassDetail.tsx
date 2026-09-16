@@ -39,10 +39,18 @@ export default function TeacherClassDetail() {
   const [lastCreated, setLastCreated] = useState<{ code: string; password: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
+  const [tuitionFee, setTuitionFee] = useState('')
+  const [scheduleInfo, setScheduleInfo] = useState('')
+  const [studyDuration, setStudyDuration] = useState('')
+  const [savingPublicInfo, setSavingPublicInfo] = useState(false)
 
   async function loadAll() {
     const { data: c } = await supabase.from('classes').select('*').eq('id', classId).single()
-    setClassRoom(c as ClassRoom)
+    const room = c as ClassRoom
+    setClassRoom(room)
+    setTuitionFee(room?.tuition_fee || '')
+    setScheduleInfo(room?.schedule_info || '')
+    setStudyDuration(room?.study_duration || '')
     const { data: s } = await supabase
       .from('students')
       .select('id, class_id, student_code, full_name, phone, tuition_paid')
@@ -170,6 +178,17 @@ export default function TeacherClassDetail() {
     }
   }
 
+  async function handleSavePublicInfo() {
+    setSavingPublicInfo(true)
+    const { error } = await supabase
+      .from('classes')
+      .update({ tuition_fee: tuitionFee, schedule_info: scheduleInfo, study_duration: studyDuration })
+      .eq('id', classId)
+    setSavingPublicInfo(false)
+    if (error) alert('Lỗi khi lưu: ' + error.message)
+    else loadAll()
+  }
+
   async function handleDeleteStudent(studentId: string, name: string) {
     if (!window.confirm(`Xóa học sinh "${name}" khỏi lớp? Toàn bộ kết quả thi của em này cũng sẽ bị xóa theo. Hành động không thể hoàn tác.`)) return
     const { error } = await supabase.from('students').delete().eq('id', studentId)
@@ -210,6 +229,22 @@ export default function TeacherClassDetail() {
         <Link to={`/teacher/classes/${classId}/practice/new`} className="btn secondary">
           📝 Tạo đề thi thử
         </Link>
+      </div>
+
+      <div className="card">
+        <h3>📢 Công khai thông tin dạy thêm</h3>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          Hiển thị trực tiếp cho học sinh của lớp này ở trang chủ học sinh.
+        </p>
+        <label>Mức học phí</label>
+        <input value={tuitionFee} onChange={(e) => setTuitionFee(e.target.value)} placeholder="VD: 500.000đ/tháng" />
+        <label>Lịch học</label>
+        <input value={scheduleInfo} onChange={(e) => setScheduleInfo(e.target.value)} placeholder="VD: Thứ 2 - 4 - 6, 18h00 - 20h00" />
+        <label>Thời gian học (thời lượng mỗi buổi)</label>
+        <input value={studyDuration} onChange={(e) => setStudyDuration(e.target.value)} placeholder="VD: 120 phút/buổi" />
+        <button className="btn" onClick={handleSavePublicInfo} disabled={savingPublicInfo}>
+          {savingPublicInfo ? 'Đang lưu...' : 'Lưu thông tin công khai'}
+        </button>
       </div>
 
       <div className="card">

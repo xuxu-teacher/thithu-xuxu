@@ -34,6 +34,7 @@ export default function StudentDashboard() {
   const [rows, setRows] = useState<Row[]>([])
   const [progress, setProgress] = useState<ProgressRow[]>([])
   const [tuitionPaid, setTuitionPaid] = useState<boolean | null>(null)
+  const [publicInfo, setPublicInfo] = useState<{ tuition_fee: string | null; schedule_info: string | null; study_duration: string | null } | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -48,6 +49,9 @@ export default function StudentDashboard() {
 
       const { data: me } = await supabase.rpc('get_my_tuition_status', { p_student_id: student!.id })
       setTuitionPaid(me ?? null)
+
+      const { data: info } = await supabase.rpc('get_class_public_info', { p_class_id: student!.class_id })
+      setPublicInfo(info?.[0] ?? null)
     }
     load()
   }, [student])
@@ -65,7 +69,10 @@ export default function StudentDashboard() {
     <div className="container">
       <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <p style={{ margin: 0, fontSize: 13 }}>Muốn luyện thêm tự do, làm bao nhiêu lần cũng được?</p>
-        <Link to="/student/practice" className="btn secondary">📝 Đề thi thử</Link>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Link to="/student/tuition-application" className="btn secondary">📝 Đơn xin học thêm</Link>
+          <Link to="/student/practice" className="btn secondary">📝 Đề thi thử</Link>
+        </div>
       </div>
 
       {tuitionPaid !== null && (
@@ -74,6 +81,15 @@ export default function StudentDashboard() {
             💰 Học phí: <span className={`badge ${tuitionPaid ? 'correct' : 'warn'}`}>{tuitionPaid ? 'Đã nộp' : 'Chưa nộp'}</span>
             {!tuitionPaid && <span style={{ fontSize: 12.5, color: 'var(--muted)', marginLeft: 8 }}>Liên hệ giáo viên nếu có thắc mắc.</span>}
           </p>
+        </div>
+      )}
+
+      {publicInfo && (publicInfo.tuition_fee || publicInfo.schedule_info || publicInfo.study_duration) && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>📢 Thông tin lớp học</h3>
+          {publicInfo.tuition_fee && <p style={{ margin: '4px 0' }}><b>Mức học phí:</b> {publicInfo.tuition_fee}</p>}
+          {publicInfo.schedule_info && <p style={{ margin: '4px 0' }}><b>Lịch học:</b> {publicInfo.schedule_info}</p>}
+          {publicInfo.study_duration && <p style={{ margin: '4px 0' }}><b>Thời gian học:</b> {publicInfo.study_duration}</p>}
         </div>
       )}
 

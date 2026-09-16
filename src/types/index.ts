@@ -58,6 +58,22 @@ export interface ClassRoom {
   class_code: string
   class_name: string
   grade?: string | null
+  tuition_fee?: string | null
+  schedule_info?: string | null
+  study_duration?: string | null
+}
+
+export interface TuitionApplication {
+  id: string
+  student_id: string
+  class_id: string
+  teacher_id: string
+  student_full_name: string
+  parent_name: string
+  parent_phone: string
+  note?: string | null
+  reviewed: boolean
+  created_at: string
 }
 
 export interface Chapter {

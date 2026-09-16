@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabaseClient'
 import { DOCUMENT_CATEGORIES } from '../data/documentCategories'
 import {
   uploadTeacherDocument,
@@ -8,26 +9,37 @@ import {
   getDocumentSignedUrl,
   deleteTeacherDocument,
 } from '../utils/teacherDocuments'
-import { TeacherDocument } from '../types'
+import { TeacherDocument, TuitionApplication } from '../types'
 
 export default function TeacherManagement() {
   const { teacher } = useAuth()
   const [docs, setDocs] = useState<TeacherDocument[]>([])
+  const [applications, setApplications] = useState<TuitionApplication[]>([])
   const [loading, setLoading] = useState(true)
+  const [mode, setMode] = useState<'docs' | 'applications'>('docs')
   const [activeCategory, setActiveCategory] = useState(DOCUMENT_CATEGORIES[0].key)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function reload() {
     setLoading(true)
-    const data = await listTeacherDocuments(teacher!.id)
-    setDocs(data)
+    const [docData, appData] = await Promise.all([
+      listTeacherDocuments(teacher!.id),
+      supabase.from('tuition_applications').select('*').eq('teacher_id', teacher!.id).order('created_at', { ascending: false }),
+    ])
+    setDocs(docData)
+    setApplications((appData.data as TuitionApplication[]) || [])
     setLoading(false)
   }
 
   useEffect(() => {
     if (teacher) reload()
   }, [teacher])
+
+  async function handleToggleReviewed(id: string, reviewed: boolean) {
+    setApplications((prev) => prev.map((a) => (a.id === id ? { ...a, reviewed } : a)))
+    await supabase.from('tuition_applications').update({ reviewed }).eq('id', id)
+  }
 
   async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -81,6 +93,62 @@ export default function TeacherManagement() {
         </p>
       </div>
 
+      <div className="card">
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <button type="button" className={`btn ${mode === 'docs' ? '' : 'secondary'}`} onClick={() => setMode('docs')}>
+            🗂 Giấy tờ theo thư mục
+          </button>
+          <button type="button" className={`btn ${mode === 'applications' ? '' : 'secondary'}`} onClick={() => setMode('applications')}>
+            👪 Đơn xin học thêm của học sinh{applications.filter((a) => !a.reviewed).length > 0 && ` (${applications.filter((a) => !a.reviewed).length} mới)`}
+          </button>
+        </div>
+      </div>
+
+      {mode === 'applications' ? (
+        <div className="card">
+          <h3>Đơn xin học thêm của học sinh</h3>
+          {loading ? (
+            <p>Đang tải...</p>
+          ) : applications.length === 0 ? (
+            <p style={{ color: 'var(--muted)' }}>Chưa có đơn nào được nộp.</p>
+          ) : (
+            <table className="list">
+              <thead>
+                <tr>
+                  <th>Học sinh</th>
+                  <th>Phụ huynh</th>
+                  <th>SĐT phụ huynh</th>
+                  <th>Ghi chú</th>
+                  <th>Ngày nộp</th>
+                  <th>Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody>
+                {applications.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.student_full_name}</td>
+                    <td>{a.parent_name}</td>
+                    <td>{a.parent_phone}</td>
+                    <td>{a.note || '-'}</td>
+                    <td>{new Date(a.created_at).toLocaleDateString('vi-VN')}</td>
+                    <td>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: 'auto', marginBottom: 0 }}
+                          checked={a.reviewed}
+                          onChange={(e) => handleToggleReviewed(a.id, e.target.checked)}
+                        />
+                        <span className={`badge ${a.reviewed ? 'correct' : 'warn'}`}>{a.reviewed ? 'Đã xử lý' : 'Chờ xử lý'}</span>
+                      </label>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : (
       <div className="card">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
           {DOCUMENT_CATEGORIES.map((c) => (
@@ -137,6 +205,7 @@ export default function TeacherManagement() {
           </table>
         )}
       </div>
+      )}
     </div>
   )
 }
