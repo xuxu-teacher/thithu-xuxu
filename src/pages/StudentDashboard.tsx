@@ -70,6 +70,7 @@ export default function StudentDashboard() {
       <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <p style={{ margin: 0, fontSize: 13 }}>Muốn luyện thêm tự do, làm bao nhiêu lần cũng được?</p>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Link to="/student/disclosure" className="btn secondary">📋 Kê khai thông tin dạy</Link>
           <Link to="/student/tuition-application" className="btn secondary">📝 Đơn xin học thêm</Link>
           <Link to="/student/practice" className="btn secondary">📝 Đề thi thử</Link>
         </div>

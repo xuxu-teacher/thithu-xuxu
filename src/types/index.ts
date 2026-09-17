@@ -74,6 +74,44 @@ export interface TuitionApplication {
   note?: string | null
   reviewed: boolean
   created_at: string
+  student_school_name?: string | null
+  student_school_class?: string | null
+  subject_registered?: string | null
+  grade_registered?: string | null
+  not_direct_student?: boolean
+  parent_consent_text?: string | null
+}
+
+export interface TeacherDisclosure {
+  teacher_id: string
+  business_name?: string | null
+  address?: string | null
+  phone?: string | null
+  school_year?: string | null
+  subjects_info?: string | null
+  teaching_form?: string | null
+  tuition_rates?: string | null
+  teacher_honorific?: string | null
+  teacher_display_name?: string | null
+  teacher_degree?: string | null
+  teacher_major?: string | null
+  teacher_workplace?: string | null
+  principal_school_name?: string | null
+  report_teaching_time?: string | null
+}
+
+export interface TeacherScheduleRow {
+  id: string
+  teacher_id: string
+  class_label: string
+  mon?: string | null
+  tue?: string | null
+  wed?: string | null
+  thu?: string | null
+  fri?: string | null
+  sat?: string | null
+  sun?: string | null
+  order_index: number
 }
 
 export interface Chapter {

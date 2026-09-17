@@ -32,6 +32,9 @@ export default function TopBar() {
             <Link to="/teacher/management" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
               Quản lý
             </Link>
+            <Link to="/teacher/disclosure" className="link-btn" style={{ color: 'rgba(255,255,255,0.9)' }}>
+              Kê khai thông tin dạy
+            </Link>
             <span className="topbar-user">
               <span className="avatar">{initials(teacher.full_name)}</span>
               {teacher.full_name}

@@ -9,6 +9,7 @@ import { handlePasteImage, fileToImgTag } from '../utils/imagePaste'
 import { MCQOption, QuestionDifficulty, QuestionPart, TrueFalseOption } from '../types'
 import { getCurriculumTopics } from '../data/curriculumTopics'
 import QuestionBankBrowser from '../components/QuestionBankBrowser'
+import QuestionBankStats from '../components/QuestionBankStats'
 import QuestionFullPreview from '../components/QuestionFullPreview'
 import MathRenderer from '../components/MathRenderer'
 
@@ -382,6 +383,7 @@ export default function TeacherQuestionBankUpload() {
         </div>
       )}
 
+      <QuestionBankStats />
       <QuestionBankBrowser />
     </div>
   )

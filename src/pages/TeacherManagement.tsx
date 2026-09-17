@@ -116,9 +116,12 @@ export default function TeacherManagement() {
               <thead>
                 <tr>
                   <th>Học sinh</th>
+                  <th>Lớp/Trường</th>
+                  <th>Môn/Khối ĐK</th>
+                  <th>Đối tượng</th>
                   <th>Phụ huynh</th>
                   <th>SĐT phụ huynh</th>
-                  <th>Ghi chú</th>
+                  <th>Ý kiến PH</th>
                   <th>Ngày nộp</th>
                   <th>Trạng thái</th>
                 </tr>
@@ -127,9 +130,12 @@ export default function TeacherManagement() {
                 {applications.map((a) => (
                   <tr key={a.id}>
                     <td>{a.student_full_name}</td>
+                    <td>{a.student_school_class || '-'} / {a.student_school_name || '-'}</td>
+                    <td>{a.subject_registered || '-'} - {a.grade_registered || '-'}</td>
+                    <td style={{ fontSize: 12 }}>{a.not_direct_student === false ? 'HS trực tiếp giảng dạy' : 'Không trực tiếp'}</td>
                     <td>{a.parent_name}</td>
                     <td>{a.parent_phone}</td>
-                    <td>{a.note || '-'}</td>
+                    <td style={{ fontSize: 12 }}>{a.parent_consent_text || a.note || '-'}</td>
                     <td>{new Date(a.created_at).toLocaleDateString('vi-VN')}</td>
                     <td>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0, cursor: 'pointer' }}>
