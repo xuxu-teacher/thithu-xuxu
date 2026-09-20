@@ -734,6 +734,29 @@ export interface ParseWordResult {
   mathTypeConvertedCount: number
 }
 
+/**
+ * Đọc thô 1 file Word BẤT KỲ (không nhất thiết là đề thi đúng cấu trúc) —
+ * trả về danh sách đoạn văn giữ nguyên công thức toán (LaTeX/MathType đã
+ * chuyển đổi), dùng cho các công cụ xử lý file Word khác ngoài luồng tạo
+ * đề (VD: mục "Chuẩn hóa Word").
+ */
+export async function parseGenericWordParagraphs(file: File): Promise<{ text: string; hasUnderline: boolean }[]> {
+  const arrayBuffer = await file.arrayBuffer()
+  const zip = await JSZip.loadAsync(arrayBuffer)
+
+  const oleItems = await extractOleItems(zip)
+  let oleLatexMap = new Map<string, string>()
+  if (oleItems.length > 0 && MATHTYPE_SERVER_URL) {
+    oleLatexMap = await convertOleToLatex(oleItems, MATHTYPE_SERVER_URL)
+  }
+
+  const documentXml = await zip.file('word/document.xml')?.async('string')
+  if (!documentXml) throw new Error('Không tìm thấy document.xml — file Word có thể bị hỏng.')
+
+  const paragraphs = extractParagraphsRaw(documentXml, oleLatexMap)
+  return paragraphs.map((p) => ({ text: p.text, hasUnderline: p.hasUnderline }))
+}
+
 export async function parseWordExam(file: File): Promise<ParseWordResult> {
   const arrayBuffer = await file.arrayBuffer()
   const zip = await JSZip.loadAsync(arrayBuffer)

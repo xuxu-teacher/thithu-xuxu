@@ -17,6 +17,7 @@ import TeacherExamFromMatrix from './pages/TeacherExamFromMatrix'
 import TeacherExamCreateHub from './pages/TeacherExamCreateHub'
 import TeacherManagement from './pages/TeacherManagement'
 import TeacherDisclosurePage from './pages/TeacherDisclosurePage'
+import TeacherWordStandardize from './pages/TeacherWordStandardize'
 import StudentDisclosurePage from './pages/StudentDisclosurePage'
 import StudentTuitionApplication from './pages/StudentTuitionApplication'
 import TeacherExamSimilar from './pages/TeacherExamSimilar'
@@ -131,6 +132,14 @@ export default function App() {
           element={
             <TeacherRoute>
               <TeacherPracticeExamCreate />
+            </TeacherRoute>
+          }
+        />
+        <Route
+          path="/teacher/word-standardize"
+          element={
+            <TeacherRoute>
+              <TeacherWordStandardize />
             </TeacherRoute>
           }
         />
