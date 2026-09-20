@@ -1,7 +1,7 @@
 import { ChangeEvent, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { parseGenericWordParagraphs } from '../utils/docxParser'
-import { standardizeIntoBlocks, QuestionBlock } from '../utils/normalizeWord'
+import { standardizeIntoBlocks, QuestionBlock, isOptionLine } from '../utils/normalizeWord'
 import MathRenderer from '../components/MathRenderer'
 
 type ColorScheme = 'black-on-white' | 'white-on-green'
@@ -31,6 +31,18 @@ export default function TeacherWordStandardize() {
     } finally {
       setProcessing(false)
     }
+  }
+
+  function updateBlockText(id: string, raw: string) {
+    setBlocks((prev) =>
+      (prev || []).map((b) =>
+        b.id === id ? { ...b, lines: raw.split('\n').map((l) => l.trim()).filter((l) => l.length > 0) } : b,
+      ),
+    )
+  }
+
+  function removeBlock(id: string) {
+    setBlocks((prev) => (prev || []).filter((b) => b.id !== id))
   }
 
   function handleExportPdf() {
@@ -65,8 +77,9 @@ export default function TeacherWordStandardize() {
           <h2>📄 Chuẩn hóa Word</h2>
           <p style={{ fontSize: 13 }}>
             Tải lên bất kỳ file Word nào chứa các câu hỏi được đánh số "Câu 1", "Câu 2"... — hệ thống tự động{' '}
-            <b>xóa toàn bộ lời giải</b> (nhận diện qua dòng "Lời giải"/"Hướng dẫn giải"/"Giải:"), giữ nguyên câu
-            hỏi và số liệu, chèn khoảng trắng giữa các câu để học sinh tự làm, rồi xuất ra PDF.
+            <b>xóa toàn bộ lời giải</b>, <b>tự tách các phương án A/B/C/D</b> nếu bị dính chung dòng với câu
+            hỏi, giữ nguyên câu hỏi và số liệu, chèn khoảng trắng giữa các câu để học sinh tự làm, rồi xuất ra
+            PDF.
           </p>
 
           <label>Chọn file Word (.docx)</label>
@@ -80,9 +93,9 @@ export default function TeacherWordStandardize() {
               <input
                 type="number"
                 min={0}
-                max={20}
+                max={50}
                 value={blankLines}
-                onChange={(e) => setBlankLines(Math.max(0, Number(e.target.value)))}
+                onChange={(e) => setBlankLines(Math.max(0, Math.min(50, Number(e.target.value))))}
                 style={{ maxWidth: 120 }}
               />
 
@@ -102,23 +115,39 @@ export default function TeacherWordStandardize() {
             </>
           )}
         </div>
+
+        {blocks && (
+          <div className="card">
+            <h3>Rà lại từng câu trước khi xuất (sửa lỗi tách sai, xóa câu thừa)</h3>
+            {blocks.map((b) => (
+              <div className="question-block" key={b.id}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => removeBlock(b.id)}>
+                    Xóa
+                  </button>
+                </div>
+                <textarea
+                  rows={Math.min(8, Math.max(2, b.lines.length))}
+                  value={b.lines.join('\n')}
+                  onChange={(e) => updateBlockText(b.id, e.target.value)}
+                />
+                <div className="card" style={{ background: '#fafbfe' }}>
+                  <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước:</b>
+                  {renderBlockPreview(b, '#111111')}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {blocks && (
-        <div
-          id="standardize-print-area"
-          className="card"
-          style={{ background: pageBg, color: textColor, padding: 24 }}
-        >
+        <div id="standardize-print-area" className="card" style={{ background: pageBg, color: textColor, padding: 24 }}>
           {fileName && <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>}
-          {blocks.map((b, i) => (
-            <div key={i}>
-              {b.lines.map((line, j) => (
-                <p key={j} style={{ color: textColor, margin: '4px 0' }}>
-                  <MathRenderer html={line} />
-                </p>
-              ))}
-              {QUESTION_START(b) &&
+          {blocks.map((b) => (
+            <div key={b.id}>
+              {renderBlockPreview(b, textColor)}
+              {isQuestionStart(b) &&
                 Array.from({ length: blankLines }).map((_, k) => (
                   <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
                     &nbsp;
@@ -132,6 +161,47 @@ export default function TeacherWordStandardize() {
   )
 }
 
-function QUESTION_START(b: QuestionBlock): boolean {
+function isQuestionStart(b: QuestionBlock): boolean {
   return /^\s*(Câu|CÂU|Bài|BÀI)\s*\d+/i.test(b.lines[0] || '')
+}
+
+/**
+ * Hiển thị các dòng của 1 câu — dòng nào là phương án (A/B/C/D) được gom
+ * theo cặp và căn đều trong lưới 2 cột (A-B 1 hàng, C-D 1 hàng) cho thẳng
+ * hàng, giống cách trình bày đề thi chuẩn; các dòng khác hiển thị bình
+ * thường theo đúng thứ tự.
+ */
+function renderBlockPreview(b: QuestionBlock, color: string) {
+  const elements: JSX.Element[] = []
+  let optionBuffer: string[] = []
+  let key = 0
+
+  const flushOptions = () => {
+    if (optionBuffer.length === 0) return
+    elements.push(
+      <div key={`opt-${key++}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', margin: '4px 0' }}>
+        {optionBuffer.map((line, i) => (
+          <div key={i} style={{ color }}>
+            <MathRenderer html={line} />
+          </div>
+        ))}
+      </div>,
+    )
+    optionBuffer = []
+  }
+
+  for (const line of b.lines) {
+    if (isOptionLine(line)) {
+      optionBuffer.push(line)
+    } else {
+      flushOptions()
+      elements.push(
+        <p key={`ln-${key++}`} style={{ color, margin: '4px 0' }}>
+          <MathRenderer html={line} />
+        </p>,
+      )
+    }
+  }
+  flushOptions()
+  return elements
 }
