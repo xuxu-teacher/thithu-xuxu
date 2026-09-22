@@ -23,7 +23,7 @@ function ToolsMenu() {
   const items = [
     { to: '/teacher/question-bank', label: '📚 Kho câu hỏi' },
     { to: '/teacher/management', label: '🗂 Quản lý' },
-    { to: '/teacher/word-standardize', label: '📄 Chuẩn hóa Word' },
+    { to: '/teacher/word-standardize', label: '📄 Hỗ trợ Word' },
   ]
 
   return (

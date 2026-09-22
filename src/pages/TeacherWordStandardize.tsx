@@ -4,83 +4,87 @@ import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import { parseGenericWordParagraphs } from '../utils/docxParser'
 import { parseIntoBlocks, QuestionBlock, isOptionLine } from '../utils/normalizeWord'
-import { autoDetectCorrectAnswers } from '../utils/detectCorrectAnswers'
+import {
+  loadRawDocx,
+  repackDocxWithParagraphs,
+  applyUnderlineToParagraphs,
+  spliceAttachSolutions,
+  downloadBlob,
+} from '../utils/docxSplice'
+import { autoDetectCorrectRawParagraphs } from '../utils/detectCorrectAnswers'
 import MathRenderer from '../components/MathRenderer'
 
 type ColorScheme = 'black-on-white' | 'white-on-green'
 
 export default function TeacherWordStandardize() {
+  const [file, setFile] = useState<File | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <div className="container">
+      <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
+        ← Trang chủ giáo viên
+      </Link>
+
+      <div className="card">
+        <h2>📄 Hỗ trợ Word</h2>
+        <p style={{ fontSize: 13 }}>
+          Tải lên 1 file Word có các câu đánh số "Câu 1", "Câu 2"... — dùng chung cho cả 3 công cụ độc lập
+          bên dưới, chọn công cụ nào tùy nhu cầu.
+        </p>
+        <label>Chọn file Word (.docx)</label>
+        <input
+          type="file"
+          accept=".docx"
+          onChange={(e: ChangeEvent<HTMLInputElement>) => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (!f) return
+            setFile(f)
+            setFileName(f.name.replace(/\.docx$/i, ''))
+            setError(null)
+          }}
+        />
+        {file && <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Đã chọn: {file.name}</p>}
+        {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+      </div>
+
+      {file && (
+        <>
+          <PdfBlankTool file={file} fileName={fileName} onError={setError} />
+          <UnderlineWordTool file={file} fileName={fileName} onError={setError} />
+          <AttachSolutionWordTool file={file} fileName={fileName} onError={setError} />
+        </>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// KHỐI 1 — Tạo file PDF có khoảng trống — tải PDF
+// ============================================================
+function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: string; onError: (e: string | null) => void }) {
   const [blocks, setBlocks] = useState<QuestionBlock[] | null>(null)
   const [blankLines, setBlankLines] = useState(3)
   const [colorScheme, setColorScheme] = useState<ColorScheme>('black-on-white')
-  const [showSolutions, setShowSolutions] = useState(false) // công cụ "Gắn lời giải" — bật/tắt độc lập
   const [processing, setProcessing] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [detecting, setDetecting] = useState(false)
-  const [fileName, setFileName] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const printRef = useRef<HTMLDivElement>(null)
 
-  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  async function handleProcess() {
     setProcessing(true)
-    setError(null)
-    setBlocks(null)
+    onError(null)
     try {
       const paragraphs = await parseGenericWordParagraphs(file)
       setBlocks(parseIntoBlocks(paragraphs))
-      setFileName(file.name.replace(/\.docx$/i, ''))
     } catch (err: any) {
-      setError(err.message || 'Có lỗi khi đọc file Word.')
+      onError(err.message || 'Có lỗi khi đọc file Word.')
     } finally {
       setProcessing(false)
     }
   }
 
-  function updateBlockText(id: string, raw: string) {
-    setBlocks((prev) =>
-      (prev || []).map((b) => {
-        if (b.id !== id) return b
-        const lines = raw.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)
-        const underline = lines.map((l, i) => (b.questionLines[i] === l ? b.underline[i] : false))
-        return { ...b, questionLines: lines, underline }
-      }),
-    )
-  }
-
-  function removeBlock(id: string) {
-    setBlocks((prev) => (prev || []).filter((b) => b.id !== id))
-  }
-
-  // ---- Công cụ độc lập 1: Tự động gạch chân đáp án (AI đọc lời giải) ----
-  async function handleAutoUnderline() {
-    if (!blocks) return
-    setDetecting(true)
-    setError(null)
-    try {
-      const updated = await autoDetectCorrectAnswers(blocks)
-      setBlocks(updated)
-    } catch (err: any) {
-      setError(err.message || 'Có lỗi khi tự động gạch chân.')
-    } finally {
-      setDetecting(false)
-    }
-  }
-
-  function toggleUnderline(blockId: string, lineIdx: number) {
-    setBlocks((prev) =>
-      (prev || []).map((b) => {
-        if (b.id !== blockId) return b
-        const underline = [...b.underline]
-        underline[lineIdx] = !underline[lineIdx]
-        return { ...b, underline }
-      }),
-    )
-  }
-
-  // ---- Công cụ độc lập 2: chèn dòng trống + tải PDF (như bản trước) ----
   async function handleDownloadPdf() {
     if (!printRef.current) return
     setExporting(true)
@@ -91,7 +95,6 @@ export default function TeacherWordStandardize() {
         useCORS: true,
         backgroundColor: colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff',
       })
-
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
       const pageWidthMm = pdf.internal.pageSize.getWidth()
       const pageHeightMm = pdf.internal.pageSize.getHeight()
@@ -107,18 +110,15 @@ export default function TeacherWordStandardize() {
         sliceCanvas.height = sliceHeightPx
         const ctx = sliceCanvas.getContext('2d')!
         ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
-
         const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
         if (pageIndex > 0) pdf.addPage()
         pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
-
         renderedPx += sliceHeightPx
         pageIndex++
       }
-
-      pdf.save(`${fileName || 'de-chuan-hoa'}.pdf`)
+      pdf.save(`${fileName || 'de'}-khoang-trong.pdf`)
     } catch (err: any) {
-      alert('Có lỗi khi xuất PDF: ' + (err.message || err))
+      onError('Có lỗi khi xuất PDF: ' + (err.message || err))
     } finally {
       setExporting(false)
     }
@@ -129,162 +129,152 @@ export default function TeacherWordStandardize() {
   const textColor = isDark ? '#ffffff' : '#111111'
 
   return (
-    <div className="container">
-      <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
-        ← Trang chủ giáo viên
-      </Link>
+    <div className="card" style={{ border: '1px solid #c7d2fe' }}>
+      <h3>📄 Tạo file PDF có khoảng trống — tải PDF</h3>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        Xóa lời giải, chèn khoảng trắng giữa mỗi câu để học sinh tự làm bài, xuất ra file PDF.
+      </p>
+      {!blocks ? (
+        <button className="btn secondary" onClick={handleProcess} disabled={processing}>
+          {processing ? 'Đang xử lý...' : 'Xử lý file'}
+        </button>
+      ) : (
+        <>
+          <label>Số dòng trống chèn giữa mỗi câu</label>
+          <input
+            type="number"
+            min={0}
+            max={50}
+            value={blankLines}
+            onChange={(e) => setBlankLines(Math.max(0, Math.min(50, Number(e.target.value))))}
+            style={{ maxWidth: 120 }}
+          />
+          <label>Màu văn bản</label>
+          <select value={colorScheme} onChange={(e) => setColorScheme(e.target.value as ColorScheme)}>
+            <option value="black-on-white">Nền trắng — chữ đen</option>
+            <option value="white-on-green">Nền xanh (bảng viết) — chữ trắng</option>
+          </select>
+          <button className="btn" onClick={handleDownloadPdf} disabled={exporting} style={{ marginTop: 12 }}>
+            {exporting ? '⏳ Đang tạo PDF...' : '⬇ Tải PDF'}
+          </button>
 
-      <div className="card">
-        <h2>📄 Chuẩn hóa Word</h2>
-        <p style={{ fontSize: 13 }}>
-          Tải lên file Word có các câu đánh số "Câu 1", "Câu 2"... — tự tách phương án dính liền dòng, tự
-          nhận diện lời giải kể cả khi tách riêng ở cuối file. Mặc định xuất ra đề trống (không lời giải) như
-          các bản trước — 2 công cụ bên dưới hoạt động độc lập, dùng cái nào tùy bạn.
-        </p>
-
-        <label>Chọn file Word (.docx)</label>
-        <input type="file" accept=".docx" onChange={handleFile} disabled={processing} />
-        {processing && <p>Đang xử lý file...</p>}
-        {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-
-        {blocks && (
-          <>
-            <label>Số dòng trống chèn giữa mỗi câu</label>
-            <input
-              type="number"
-              min={0}
-              max={50}
-              value={blankLines}
-              onChange={(e) => setBlankLines(Math.max(0, Math.min(50, Number(e.target.value))))}
-              style={{ maxWidth: 120 }}
-            />
-
-            <label>Màu văn bản</label>
-            <select value={colorScheme} onChange={(e) => setColorScheme(e.target.value as ColorScheme)}>
-              <option value="black-on-white">Nền trắng — chữ đen</option>
-              <option value="white-on-green">Nền xanh (bảng viết) — chữ trắng</option>
-            </select>
-
-            <button className="btn" onClick={handleDownloadPdf} disabled={exporting} style={{ marginTop: 12 }}>
-              {exporting ? '⏳ Đang tạo PDF...' : '⬇ Tải về PDF'}
-            </button>
-          </>
-        )}
-      </div>
-
-      {blocks && (
-        <div className="card" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <h3 style={{ marginTop: 0 }}>🖊 Công cụ 1 — Tự động gạch chân đáp án</h3>
-            <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-              AI đọc lời giải từng câu để tự xác định và gạch chân đáp án đúng (trắc nghiệm: 1 đáp án; Đúng/
-              Sai: từng ý riêng). Câu không có lời giải sẽ được bỏ qua.
-            </p>
-            <button type="button" className="btn secondary" onClick={handleAutoUnderline} disabled={detecting}>
-              {detecting ? '⏳ Đang phân tích...' : '🖊 Tự động gạch chân'}
-            </button>
-          </div>
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <h3 style={{ marginTop: 0 }}>📎 Công cụ 2 — Gắn lời giải vào đúng câu</h3>
-            <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-              Hiện lại lời giải ngay dưới đúng câu tương ứng (kể cả khi lời giải nằm tách riêng ở cuối file
-              gốc) — thay vì tạo đề trống.
-            </p>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="checkbox"
-                style={{ width: 'auto', marginBottom: 0 }}
-                checked={showSolutions}
-                onChange={(e) => setShowSolutions(e.target.checked)}
-              />
-              Hiện lời giải trong bản xuất
-            </label>
-          </div>
-        </div>
-      )}
-
-      {blocks && (
-        <div className="card">
-          <h3>Rà lại từng câu (sửa lỗi, xóa câu thừa, bấm dòng để tự gạch/bỏ gạch chân)</h3>
-          {blocks.map((b) => (
-            <div className="question-block" key={b.id}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{b.number ? `Câu ${b.number}` : '(không đánh số)'}</span>
-                <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => removeBlock(b.id)}>
-                  Xóa
-                </button>
-              </div>
-              <textarea
-                rows={Math.min(8, Math.max(2, b.questionLines.length))}
-                value={b.questionLines.join('\n')}
-                onChange={(e) => updateBlockText(b.id, e.target.value)}
-              />
-              <div className="card" style={{ background: '#fafbfe' }}>
-                <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước (bấm dòng để gạch/bỏ gạch chân):</b>
-                {b.questionLines.map((line, i) => (
-                  <p
-                    key={i}
-                    onClick={() => toggleUnderline(b.id, i)}
-                    style={{
-                      color: '#111111',
-                      margin: '4px 0',
-                      cursor: 'pointer',
-                      textDecoration: b.underline[i] ? 'underline' : 'none',
-                      background: b.underline[i] ? '#fff3cd' : undefined,
-                    }}
-                  >
-                    <MathRenderer html={line} />
-                  </p>
-                ))}
-                {b.solutionLines.length > 0 && (
-                  <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                    ✓ Có lời giải đi kèm ({b.solutionLines.length} dòng) — bật "Hiện lời giải trong bản xuất" ở
-                    Công cụ 2 để đưa vào bản tải về.
-                  </p>
-                )}
-              </div>
+          <div style={{ position: 'absolute', left: -9999, top: 0 }}>
+            <div ref={printRef} style={{ width: '794px', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}>
+              {fileName && <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>}
+              {blocks.map((b) => (
+                <div key={b.id}>
+                  {renderQuestionOnly(b, textColor)}
+                  {b.number !== null &&
+                    Array.from({ length: blankLines }).map((_, k) => (
+                      <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
+                        &nbsp;
+                      </p>
+                    ))}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
-
-      {blocks && (
-        <div style={{ position: 'absolute', left: -9999, top: 0 }}>
-          <div
-            ref={printRef}
-            style={{ width: '794px', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}
-          >
-            {fileName && <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>}
-            {blocks.map((b) => (
-              <div key={b.id}>
-                {renderBlockPreview(b, textColor, showSolutions)}
-                {b.number !== null &&
-                  Array.from({ length: blankLines }).map((_, k) => (
-                    <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
-                      &nbsp;
-                    </p>
-                  ))}
-              </div>
-            ))}
           </div>
-        </div>
+        </>
       )}
     </div>
   )
 }
 
-function renderBlockPreview(b: QuestionBlock, color: string, showSolutions: boolean) {
+// ============================================================
+// KHỐI 2 — Gạch chân đáp án theo file mẫu — tải về file Word
+// ============================================================
+function UnderlineWordTool({ file, fileName, onError }: { file: File; fileName: string; onError: (e: string | null) => void }) {
+  const [working, setWorking] = useState(false)
+  const [doneNote, setDoneNote] = useState<string | null>(null)
+
+  async function handleRun() {
+    setWorking(true)
+    onError(null)
+    setDoneNote(null)
+    try {
+      const raw = await loadRawDocx(file)
+      const targets = await autoDetectCorrectRawParagraphs(raw.paragraphs)
+      if (targets.size === 0) {
+        setDoneNote('⚠ Không tìm được lời giải rõ ràng cho câu nào trong file để xác định đáp án — chưa gạch chân được câu nào.')
+        return
+      }
+      const newParagraphs = applyUnderlineToParagraphs(raw.paragraphs, targets)
+      const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, newParagraphs.map((p) => p.xml))
+      downloadBlob(blob, `${fileName || 'de'}-gach-chan-dap-an.docx`)
+      setDoneNote(`✅ Đã gạch chân ${targets.size} đáp án và tải file Word về.`)
+    } catch (err: any) {
+      onError(err.message || 'Có lỗi khi xử lý.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ border: '1px solid #c7d2fe' }}>
+      <h3>🖊 Gạch chân đáp án theo file mẫu — tải về file Word</h3>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        AI đọc lời giải từng câu để tự xác định và gạch chân đáp án đúng NGAY TRONG file Word gốc — giữ
+        nguyên toàn bộ định dạng, font chữ, công thức, ảnh của đề, chỉ thêm gạch chân vào đúng phương án.
+      </p>
+      <button className="btn" onClick={handleRun} disabled={working}>
+        {working ? '⏳ Đang xử lý...' : '🖊 Gạch chân & Tải Word'}
+      </button>
+      {doneNote && <p style={{ fontSize: 12.5, marginTop: 8 }}>{doneNote}</p>}
+    </div>
+  )
+}
+
+// ============================================================
+// KHỐI 3 — Ghép đề với lời giải — tải về file Word
+// ============================================================
+function AttachSolutionWordTool({ file, fileName, onError }: { file: File; fileName: string; onError: (e: string | null) => void }) {
+  const [working, setWorking] = useState(false)
+  const [doneNote, setDoneNote] = useState<string | null>(null)
+
+  async function handleRun() {
+    setWorking(true)
+    onError(null)
+    setDoneNote(null)
+    try {
+      const raw = await loadRawDocx(file)
+      const merged = spliceAttachSolutions(raw.paragraphs)
+      const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, merged.map((p) => p.xml))
+      downloadBlob(blob, `${fileName || 'de'}-co-loi-giai.docx`)
+      setDoneNote('✅ Đã ghép lời giải vào đúng câu và tải file Word về.')
+    } catch (err: any) {
+      onError(err.message || 'Có lỗi khi xử lý.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ border: '1px solid #c7d2fe' }}>
+      <h3>📎 Ghép đề với lời giải — tải về file Word</h3>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        Giữ nguyên toàn bộ đề gốc, chỉ di chuyển lời giải (kể cả khi đang tách riêng ở cuối file, đánh số lại
+        từ đầu) về đúng ngay dưới câu hỏi tương ứng — không dựng lại nội dung, giữ nguyên định dạng gốc.
+      </p>
+      <button className="btn" onClick={handleRun} disabled={working}>
+        {working ? '⏳ Đang xử lý...' : '📎 Ghép lời giải & Tải Word'}
+      </button>
+      {doneNote && <p style={{ fontSize: 12.5, marginTop: 8 }}>{doneNote}</p>}
+    </div>
+  )
+}
+
+function renderQuestionOnly(b: QuestionBlock, color: string) {
   const elements: JSX.Element[] = []
-  let optionBuffer: { text: string; underline: boolean }[] = []
+  let optionBuffer: string[] = []
   let key = 0
 
   const flushOptions = () => {
     if (optionBuffer.length === 0) return
     elements.push(
       <div key={`opt-${key++}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', margin: '4px 0' }}>
-        {optionBuffer.map((opt, i) => (
-          <div key={i} style={{ color, textDecoration: opt.underline ? 'underline' : 'none' }}>
-            <MathRenderer html={opt.text} />
+        {optionBuffer.map((line, i) => (
+          <div key={i} style={{ color }}>
+            <MathRenderer html={line} />
           </div>
         ))}
       </div>,
@@ -292,34 +282,18 @@ function renderBlockPreview(b: QuestionBlock, color: string, showSolutions: bool
     optionBuffer = []
   }
 
-  b.questionLines.forEach((line, i) => {
+  for (const line of b.questionLines) {
     if (isOptionLine(line)) {
-      optionBuffer.push({ text: line, underline: b.underline[i] })
+      optionBuffer.push(line)
     } else {
       flushOptions()
       elements.push(
-        <p key={`ln-${key++}`} style={{ color, margin: '4px 0', textDecoration: b.underline[i] ? 'underline' : 'none' }}>
+        <p key={`ln-${key++}`} style={{ color, margin: '4px 0' }}>
           <MathRenderer html={line} />
         </p>,
       )
     }
-  })
-  flushOptions()
-
-  if (showSolutions && b.solutionLines.length > 0) {
-    elements.push(
-      <p key="sol-label" style={{ color, margin: '6px 0 2px', fontWeight: 'bold' }}>
-        Lời giải:
-      </p>,
-    )
-    b.solutionLines.forEach((line, i) => {
-      elements.push(
-        <p key={`sol-${i}`} style={{ color, margin: '2px 0' }}>
-          <MathRenderer html={line} />
-        </p>,
-      )
-    })
   }
-
+  flushOptions()
   return elements
 }
