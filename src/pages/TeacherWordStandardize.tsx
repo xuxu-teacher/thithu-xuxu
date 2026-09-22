@@ -7,15 +7,18 @@ import { standardizeIntoBlocks, QuestionBlock, isOptionLine } from '../utils/nor
 import MathRenderer from '../components/MathRenderer'
 
 type ColorScheme = 'black-on-white' | 'white-on-green'
+type SolutionMode = 'strip' | 'attach'
 
 export default function TeacherWordStandardize() {
   const [blocks, setBlocks] = useState<QuestionBlock[] | null>(null)
   const [blankLines, setBlankLines] = useState(3)
   const [colorScheme, setColorScheme] = useState<ColorScheme>('black-on-white')
+  const [solutionMode, setSolutionMode] = useState<SolutionMode>('strip')
   const [processing, setProcessing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [rawParagraphs, setRawParagraphs] = useState<{ text: string; hasUnderline: boolean }[] | null>(null)
   const printRef = useRef<HTMLDivElement>(null)
 
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
@@ -27,8 +30,8 @@ export default function TeacherWordStandardize() {
     setBlocks(null)
     try {
       const paragraphs = await parseGenericWordParagraphs(file)
-      const result = standardizeIntoBlocks(paragraphs)
-      setBlocks(result)
+      setRawParagraphs(paragraphs)
+      setBlocks(standardizeIntoBlocks(paragraphs, solutionMode))
       setFileName(file.name.replace(/\.docx$/i, ''))
     } catch (err: any) {
       setError(err.message || 'Có lỗi khi đọc file Word.')
@@ -37,11 +40,31 @@ export default function TeacherWordStandardize() {
     }
   }
 
+  function reprocessWithMode(newMode: SolutionMode) {
+    setSolutionMode(newMode)
+    if (rawParagraphs) setBlocks(standardizeIntoBlocks(rawParagraphs, newMode))
+  }
+
   function updateBlockText(id: string, raw: string) {
     setBlocks((prev) =>
-      (prev || []).map((b) =>
-        b.id === id ? { ...b, lines: raw.split('\n').map((l) => l.trim()).filter((l) => l.length > 0) } : b,
-      ),
+      (prev || []).map((b) => {
+        if (b.id !== id) return b
+        const lines = raw.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)
+        // Giữ nguyên trạng thái gạch chân cho các dòng không đổi vị trí; dòng mới thêm mặc định không gạch chân.
+        const underline = lines.map((l, i) => (b.lines[i] === l ? b.underline[i] : false))
+        return { ...b, lines, underline }
+      }),
+    )
+  }
+
+  function toggleUnderline(blockId: string, lineIdx: number) {
+    setBlocks((prev) =>
+      (prev || []).map((b) => {
+        if (b.id !== blockId) return b
+        const underline = [...b.underline]
+        underline[lineIdx] = !underline[lineIdx]
+        return { ...b, underline }
+      }),
     )
   }
 
@@ -49,10 +72,6 @@ export default function TeacherWordStandardize() {
     setBlocks((prev) => (prev || []).filter((b) => b.id !== id))
   }
 
-  // Xuất PDF trực tiếp bằng html2canvas + jsPDF — chụp đúng màu nền/chữ
-  // đang hiển thị (không qua hộp thoại in của trình duyệt, nên không bị
-  // trình duyệt tự xóa màu nền, không có tiêu đề/ngày giờ trình duyệt tự
-  // chèn vào, không cần bấm thêm bước nào khác — bấm là tải file về luôn.
   async function handleDownloadPdf() {
     if (!printRef.current) return
     setExporting(true)
@@ -67,7 +86,6 @@ export default function TeacherWordStandardize() {
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
       const pageWidthMm = pdf.internal.pageSize.getWidth()
       const pageHeightMm = pdf.internal.pageSize.getHeight()
-
       const pxPerMm = canvas.width / pageWidthMm
       const pageHeightPx = Math.floor(pageHeightMm * pxPerMm)
 
@@ -75,7 +93,6 @@ export default function TeacherWordStandardize() {
       let pageIndex = 0
       while (renderedPx < canvas.height) {
         const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
-
         const sliceCanvas = document.createElement('canvas')
         sliceCanvas.width = canvas.width
         sliceCanvas.height = sliceHeightPx
@@ -84,7 +101,7 @@ export default function TeacherWordStandardize() {
 
         const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
         if (pageIndex > 0) pdf.addPage()
-        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, (sliceHeightPx / pxPerMm))
+        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
 
         renderedPx += sliceHeightPx
         pageIndex++
@@ -111,9 +128,9 @@ export default function TeacherWordStandardize() {
       <div className="card">
         <h2>📄 Chuẩn hóa Word</h2>
         <p style={{ fontSize: 13 }}>
-          Tải lên bất kỳ file Word nào chứa các câu hỏi được đánh số "Câu 1", "Câu 2"... — hệ thống tự động{' '}
-          <b>xóa toàn bộ lời giải</b>, <b>tự tách các phương án A/B/C/D</b> nếu bị dính chung dòng với câu
-          hỏi, giữ nguyên câu hỏi và số liệu, chèn khoảng trắng giữa các câu để học sinh tự làm, rồi tải về
+          Tải lên bất kỳ file Word nào chứa các câu hỏi được đánh số "Câu 1", "Câu 2"... — tự tách phương án
+          A/B/C/D nếu dính chung dòng, tự nhận diện lời giải kể cả khi lời giải tách riêng ở cuối file (đề +
+          đáp án riêng phần), chèn khoảng trắng giữa các câu, đánh dấu gạch chân đáp án thủ công, rồi tải về
           PDF trực tiếp.
         </p>
 
@@ -124,6 +141,12 @@ export default function TeacherWordStandardize() {
 
         {blocks && (
           <>
+            <label>Xử lý lời giải</label>
+            <select value={solutionMode} onChange={(e) => reprocessWithMode(e.target.value as SolutionMode)}>
+              <option value="strip">Xóa lời giải (đề trống để học sinh tự làm)</option>
+              <option value="attach">Giữ lời giải, ghép đúng vào từng câu</option>
+            </select>
+
             <label>Số dòng trống chèn giữa mỗi câu</label>
             <input
               type="number"
@@ -149,10 +172,15 @@ export default function TeacherWordStandardize() {
 
       {blocks && (
         <div className="card">
-          <h3>Rà lại từng câu trước khi tải (sửa lỗi tách sai, xóa câu thừa)</h3>
+          <h3>Rà lại từng câu trước khi tải (sửa lỗi tách sai, xóa câu thừa, gạch chân đáp án)</h3>
+          <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+            Bấm vào 1 dòng phương án (A/B/C/D) bên dưới ô xem trước để bật/tắt gạch chân — dùng đánh dấu đáp
+            án đúng.
+          </p>
           {blocks.map((b) => (
             <div className="question-block" key={b.id}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{b.number ? `Câu ${b.number}` : '(không đánh số)'}</span>
                 <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => removeBlock(b.id)}>
                   Xóa
                 </button>
@@ -163,8 +191,22 @@ export default function TeacherWordStandardize() {
                 onChange={(e) => updateBlockText(b.id, e.target.value)}
               />
               <div className="card" style={{ background: '#fafbfe' }}>
-                <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước:</b>
-                {renderBlockPreview(b, '#111111')}
+                <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước (bấm dòng để gạch chân):</b>
+                {b.lines.map((line, i) => (
+                  <p
+                    key={i}
+                    onClick={() => toggleUnderline(b.id, i)}
+                    style={{
+                      color: '#111111',
+                      margin: '4px 0',
+                      cursor: 'pointer',
+                      textDecoration: b.underline[i] ? 'underline' : 'none',
+                      background: b.underline[i] ? '#fff3cd' : undefined,
+                    }}
+                  >
+                    <MathRenderer html={line} />
+                  </p>
+                ))}
               </div>
             </div>
           ))}
@@ -173,8 +215,6 @@ export default function TeacherWordStandardize() {
 
       {blocks && (
         <div style={{ position: 'absolute', left: -9999, top: 0 }}>
-          {/* Vùng dựng nội dung để chụp xuất PDF — luôn tồn tại trong DOM, chỉ đẩy ra ngoài màn hình
-              (không dùng display:none / height:0 để html2canvas vẫn đọc đúng kích thước/màu sắc thật). */}
           <div
             ref={printRef}
             style={{ width: '794px', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}
@@ -183,7 +223,7 @@ export default function TeacherWordStandardize() {
             {blocks.map((b) => (
               <div key={b.id}>
                 {renderBlockPreview(b, textColor)}
-                {isQuestionStart(b) &&
+                {b.number !== null &&
                   Array.from({ length: blankLines }).map((_, k) => (
                     <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
                       &nbsp;
@@ -198,28 +238,23 @@ export default function TeacherWordStandardize() {
   )
 }
 
-function isQuestionStart(b: QuestionBlock): boolean {
-  return /^\s*(Câu|CÂU|Bài|BÀI)\s*\d+/i.test(b.lines[0] || '')
-}
-
 /**
  * Hiển thị các dòng của 1 câu — dòng nào là phương án (A/B/C/D) được gom
- * theo cặp và căn đều trong lưới 2 cột (A-B 1 hàng, C-D 1 hàng) cho thẳng
- * hàng, giống cách trình bày đề thi chuẩn; các dòng khác hiển thị bình
- * thường theo đúng thứ tự.
+ * theo cặp và căn đều trong lưới 2 cột; dòng nào bị đánh dấu gạch chân
+ * (đáp án đúng) hiển thị với text-decoration underline.
  */
 function renderBlockPreview(b: QuestionBlock, color: string) {
   const elements: JSX.Element[] = []
-  let optionBuffer: string[] = []
+  let optionBuffer: { text: string; underline: boolean }[] = []
   let key = 0
 
   const flushOptions = () => {
     if (optionBuffer.length === 0) return
     elements.push(
       <div key={`opt-${key++}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', margin: '4px 0' }}>
-        {optionBuffer.map((line, i) => (
-          <div key={i} style={{ color }}>
-            <MathRenderer html={line} />
+        {optionBuffer.map((opt, i) => (
+          <div key={i} style={{ color, textDecoration: opt.underline ? 'underline' : 'none' }}>
+            <MathRenderer html={opt.text} />
           </div>
         ))}
       </div>,
@@ -227,18 +262,18 @@ function renderBlockPreview(b: QuestionBlock, color: string) {
     optionBuffer = []
   }
 
-  for (const line of b.lines) {
+  b.lines.forEach((line, i) => {
     if (isOptionLine(line)) {
-      optionBuffer.push(line)
+      optionBuffer.push({ text: line, underline: b.underline[i] })
     } else {
       flushOptions()
       elements.push(
-        <p key={`ln-${key++}`} style={{ color, margin: '4px 0' }}>
+        <p key={`ln-${key++}`} style={{ color, margin: '4px 0', textDecoration: b.underline[i] ? 'underline' : 'none' }}>
           <MathRenderer html={line} />
         </p>,
       )
     }
-  }
+  })
   flushOptions()
   return elements
 }
