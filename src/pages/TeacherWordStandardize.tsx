@@ -10,8 +10,9 @@ import {
   applyUnderlineToParagraphs,
   spliceAttachSolutions,
   downloadBlob,
+  RawParagraph,
 } from '../utils/docxSplice'
-import { autoDetectCorrectRawParagraphs } from '../utils/detectCorrectAnswers'
+import { autoDetectCorrectRawParagraphs } from '../utils/detectCorrectAnswers' // dùng ở cả khối 2 và khối 3
 import MathRenderer from '../components/MathRenderer'
 
 type ColorScheme = 'black-on-white' | 'white-on-green'
@@ -237,10 +238,16 @@ function AttachSolutionWordTool({ file, fileName, onError }: { file: File; fileN
     setDoneNote(null)
     try {
       const raw = await loadRawDocx(file)
-      const merged = spliceAttachSolutions(raw.paragraphs)
+
+      // Gạch chân TRƯỚC khi ghép — lúc này options vẫn còn nguyên vị trí gần
+      // câu hỏi gốc, tránh phải dò lại sau khi thứ tự đoạn văn đã bị xáo trộn.
+      const targets = await autoDetectCorrectRawParagraphs(raw.paragraphs)
+      const underlined: RawParagraph[] = applyUnderlineToParagraphs(raw.paragraphs, targets)
+
+      const merged = spliceAttachSolutions(underlined)
       const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, merged.map((p) => p.xml))
-      downloadBlob(blob, `${fileName || 'de'}-co-loi-giai.docx`)
-      setDoneNote('✅ Đã ghép lời giải vào đúng câu và tải file Word về.')
+      downloadBlob(blob, `${fileName || 'de'}-co-loi-giai-gach-chan.docx`)
+      setDoneNote(`✅ Đã ghép lời giải + gạch chân ${targets.length} đáp án, tải file Word về.`)
     } catch (err: any) {
       onError(err.message || 'Có lỗi khi xử lý.')
     } finally {
@@ -256,7 +263,7 @@ function AttachSolutionWordTool({ file, fileName, onError }: { file: File; fileN
         từ đầu) về đúng ngay dưới câu hỏi tương ứng — không dựng lại nội dung, giữ nguyên định dạng gốc.
       </p>
       <button className="btn" onClick={handleRun} disabled={working}>
-        {working ? '⏳ Đang xử lý...' : '📎 Ghép lời giải & Tải Word'}
+        {working ? '⏳ Đang xử lý...' : '📎 Ghép lời giải + Gạch chân đáp án'}
       </button>
       {doneNote && <p style={{ fontSize: 12.5, marginTop: 8 }}>{doneNote}</p>}
     </div>
