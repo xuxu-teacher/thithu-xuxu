@@ -194,25 +194,42 @@ async function extractOleItems(zip: JSZip): Promise<Array<{ id: string; ole_b64:
   return items
 }
 
+// Gửi tối đa từng đợt nhỏ 1 lần — file có hàng trăm công thức (OLE) gửi
+// hết trong 1 request rất dễ bị timeout hoặc vượt giới hạn payload của
+// máy chủ chuyển đổi, khiến một phần công thức (thường là công thức phức
+// tạp hơn, ví dụ có ký hiệu vectơ) bị rớt mất mà không báo lỗi rõ ràng.
+const OLE_BATCH_SIZE = 40
+
 async function convertOleToLatex(
   items: Array<{ id: string; ole_b64: string }>,
   serverUrl: string
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   if (!items.length || !serverUrl) return map
-  try {
-    const res = await fetch(`${serverUrl}/v1/convert`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, wrap: true }),
-    })
-    if (!res.ok) throw new Error(`Máy chủ MathType trả về lỗi ${res.status}`)
-    const data = await res.json()
-    for (const r of data.results || []) {
-      if (r.id && r.latex && !r.error) map.set(r.id, r.latex.trim())
+
+  const batches: Array<{ id: string; ole_b64: string }>[] = []
+  for (let i = 0; i < items.length; i += OLE_BATCH_SIZE) {
+    batches.push(items.slice(i, i + OLE_BATCH_SIZE))
+  }
+
+  for (const batch of batches) {
+    try {
+      const res = await fetch(`${serverUrl}/v1/convert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: batch, wrap: true }),
+      })
+      if (!res.ok) throw new Error(`Máy chủ MathType trả về lỗi ${res.status}`)
+      const data = await res.json()
+      for (const r of data.results || []) {
+        if (r.id && r.latex && !r.error) map.set(r.id, r.latex.trim())
+      }
+    } catch (e) {
+      // Một đợt lỗi không làm hỏng cả file — các đợt khác vẫn tiếp tục,
+      // công thức thuộc đợt lỗi sẽ được đánh dấu "cần rà lại" như bình
+      // thường (không có latex -> giữ trống, các bước sau đã xử lý việc này).
+      console.warn('[docxParser] 1 đợt chuyển đổi OLE thất bại, bỏ qua đợt này, tiếp tục các đợt còn lại:', e)
     }
-  } catch (e) {
-    console.warn('[docxParser] Máy chủ MathType không phản hồi, bỏ qua chuyển đổi OLE:', e)
   }
   return map
 }
@@ -740,7 +757,9 @@ export interface ParseWordResult {
  * chuyển đổi), dùng cho các công cụ xử lý file Word khác ngoài luồng tạo
  * đề (VD: mục "Chuẩn hóa Word").
  */
-export async function parseGenericWordParagraphs(file: File): Promise<{ text: string; hasUnderline: boolean }[]> {
+export async function parseGenericWordParagraphs(
+  file: File,
+): Promise<{ text: string; hasUnderline: boolean }[]> {
   const arrayBuffer = await file.arrayBuffer()
   const zip = await JSZip.loadAsync(arrayBuffer)
 
@@ -750,11 +769,22 @@ export async function parseGenericWordParagraphs(file: File): Promise<{ text: st
     oleLatexMap = await convertOleToLatex(oleItems, MATHTYPE_SERVER_URL)
   }
 
+  // Trước bản sửa này, hàm chỉ trả về chữ (p.text), BỎ SÓT hẳn phần ảnh
+  // (p.imageRIds) dù chúng đã được tách sẵn ở extractParagraphsRaw — đây
+  // là lý do "Chuẩn hóa Word" trước đó luôn mất hình ảnh. Giờ nối ảnh
+  // (chuyển base64 thành thẻ <img>) vào cuối text của đúng đoạn chứa nó.
+  const { images } = await extractImages(zip)
+  const imageByRid = new Map(images.filter((img) => img.rId).map((img) => [img.rId, img]))
+
   const documentXml = await zip.file('word/document.xml')?.async('string')
   if (!documentXml) throw new Error('Không tìm thấy document.xml — file Word có thể bị hỏng.')
 
   const paragraphs = extractParagraphsRaw(documentXml, oleLatexMap)
-  return paragraphs.map((p) => ({ text: p.text, hasUnderline: p.hasUnderline }))
+  return paragraphs.map((p) => {
+    const imgs = p.imageRIds.map((rid) => imageByRid.get(rid)).filter((x): x is ParsedImage => !!x)
+    const imgHtml = imgs.length > 0 ? imagesToHtml(imgs) : ''
+    return { text: (p.text + ' ' + imgHtml).trim(), hasUnderline: p.hasUnderline }
+  })
 }
 
 export async function parseWordExam(file: File): Promise<ParseWordResult> {
