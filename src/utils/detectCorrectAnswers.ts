@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabaseClient'
 import { QuestionBlock, isOptionLine } from './normalizeWord'
-import { RawParagraph, buildQuestionMap, isOptionText } from './docxSplice'
+import { RawParagraph, buildQuestionMap, isOptionText, splitOptionParagraphs, OptionRef } from './docxSplice'
 
 /**
  * Gọi AI đọc lời giải của từng câu để tự xác định đáp án đúng, trả về
@@ -81,33 +81,59 @@ async function callDetectApi(payload: { key: string; questionText: string; optio
  * addUnderlineToParagraph/applyUnderlineToParagraphs áp dụng lên bản gốc,
  * giữ nguyên mọi định dạng khác.
  */
-export async function autoDetectCorrectRawParagraphs(paragraphs: RawParagraph[]): Promise<Set<RawParagraph>> {
+// Mẫu "Chọn X" / "Chọn đáp án X" rất phổ biến trong lời giải trắc nghiệm
+// Việt Nam — nhận diện thẳng bằng regex, chính xác 100% khi có, nhanh và
+// miễn phí, không cần gọi AI cho những câu này.
+const CHON_RE = /Chọn\s*(?:đáp án\s*)?([A-D])\b/i
+
+export function detectChonAnswer(solutionText: string): string | null {
+  const m = solutionText.match(CHON_RE)
+  return m ? m[1].toUpperCase() : null
+}
+
+export interface UnderlineTarget {
+  paragraph: RawParagraph
+  letter: string
+}
+
+export async function autoDetectCorrectRawParagraphs(paragraphs: RawParagraph[]): Promise<UnderlineTarget[]> {
   const qmap = buildQuestionMap(paragraphs)
+  const targets: UnderlineTarget[] = []
+
   const payload: { key: string; questionText: string; optionLines: string[]; solutionText: string }[] = []
-  const optionParagraphsByKey = new Map<string, RawParagraph[]>()
+  const optionRefsByKey = new Map<string, OptionRef[]>()
 
   for (const [number, { question, solution }] of qmap) {
-    const optionParas = question.filter((p) => isOptionText(p.plainText))
-    if (optionParas.length === 0) continue
+    const optionRefs = splitOptionParagraphs(question)
+    if (optionRefs.length === 0) continue
+    const solutionText = solution.map((p) => p.plainText).join(' ')
+
+    // Chỉ áp dụng lối tắt "Chọn X" cho trắc nghiệm 1 đáp án (chữ hoa A-D) —
+    // Đúng/Sai (chữ thường) luôn cần AI xét riêng từng ý.
+    const isUpper = optionRefs[0].letter >= 'A' && optionRefs[0].letter <= 'D'
+    const chon = isUpper ? detectChonAnswer(solutionText) : null
+    if (chon) {
+      const match = optionRefs.find((r) => r.letter === chon)
+      if (match) {
+        targets.push({ paragraph: match.paragraph, letter: match.letter })
+        continue // câu này xong, không cần đưa vào lô gửi AI
+      }
+    }
+
     const questionText = question.filter((p) => !isOptionText(p.plainText)).map((p) => p.plainText).join(' ')
     const key = String(number)
-    payload.push({
-      key,
-      questionText,
-      optionLines: optionParas.map((p) => p.plainText),
-      solutionText: solution.map((p) => p.plainText).join(' '),
-    })
-    optionParagraphsByKey.set(key, optionParas)
+    payload.push({ key, questionText, optionLines: optionRefs.map((r) => r.text), solutionText })
+    optionRefsByKey.set(key, optionRefs)
   }
-  if (payload.length === 0) return new Set()
+
+  if (payload.length === 0) return targets
 
   const results = await callDetectApi(payload)
-  const targets = new Set<RawParagraph>()
   for (const r of results) {
-    const optionParas = optionParagraphsByKey.get(r.key)
-    if (!optionParas) continue
+    const optionRefs = optionRefsByKey.get(r.key)
+    if (!optionRefs) continue
     for (const idx of r.correctIndices) {
-      if (optionParas[idx]) targets.add(optionParas[idx])
+      if (optionRefs[idx]) targets.push({ paragraph: optionRefs[idx].paragraph, letter: optionRefs[idx].letter })
     }
   }
   return targets

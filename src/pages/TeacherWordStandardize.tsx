@@ -194,14 +194,14 @@ function UnderlineWordTool({ file, fileName, onError }: { file: File; fileName: 
     try {
       const raw = await loadRawDocx(file)
       const targets = await autoDetectCorrectRawParagraphs(raw.paragraphs)
-      if (targets.size === 0) {
+      if (targets.length === 0) {
         setDoneNote('⚠ Không tìm được lời giải rõ ràng cho câu nào trong file để xác định đáp án — chưa gạch chân được câu nào.')
         return
       }
       const newParagraphs = applyUnderlineToParagraphs(raw.paragraphs, targets)
       const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, newParagraphs.map((p) => p.xml))
       downloadBlob(blob, `${fileName || 'de'}-gach-chan-dap-an.docx`)
-      setDoneNote(`✅ Đã gạch chân ${targets.size} đáp án và tải file Word về.`)
+      setDoneNote(`✅ Đã gạch chân ${targets.length} đáp án và tải file Word về.`)
     } catch (err: any) {
       onError(err.message || 'Có lỗi khi xử lý.')
     } finally {

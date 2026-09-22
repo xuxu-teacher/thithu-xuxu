@@ -89,9 +89,87 @@ export function addUnderlineToParagraph(pXml: string): string {
   })
 }
 
-/** Áp dụng gạch chân cho đúng các đoạn văn nằm trong tập targets, giữ nguyên mọi đoạn khác. */
-export function applyUnderlineToParagraphs(all: RawParagraph[], targets: Set<RawParagraph>): RawParagraph[] {
-  return all.map((p) => (targets.has(p) ? { ...p, xml: addUnderlineToParagraph(p.xml) } : p))
+/**
+ * Áp dụng gạch chân theo đúng (đoạn văn, chữ cái) — nhiều mục tiêu có thể
+ * trỏ chung 1 đoạn văn (trường hợp cả 4 phương án gộp 1 dòng); mỗi mục
+ * tiêu chỉ gạch đúng phạm vi chữ của riêng phương án đó trong đoạn, không
+ * đụng phần còn lại.
+ */
+export function applyUnderlineToParagraphs(
+  all: RawParagraph[],
+  targets: { paragraph: RawParagraph; letter: string }[],
+): RawParagraph[] {
+  const lettersByParagraph = new Map<RawParagraph, Set<string>>()
+  for (const t of targets) {
+    const set = lettersByParagraph.get(t.paragraph) || new Set<string>()
+    set.add(t.letter.toUpperCase())
+    lettersByParagraph.set(t.paragraph, set)
+  }
+
+  return all.map((p) => {
+    const letters = lettersByParagraph.get(p)
+    if (!letters) return p
+    let xml = p.xml
+    for (const letter of letters) xml = addUnderlineToOptionInParagraph(xml, letter)
+    return { ...p, xml }
+  })
+}
+
+/**
+ * Một số file gộp cả 4 phương án A/B/C/D chung 1 đoạn văn (ngăn cách bằng
+ * tab) thay vì mỗi phương án 1 đoạn riêng — nếu gạch chân cả đoạn sẽ gạch
+ * nhầm cả 4. Hàm này chỉ gạch chân đúng phạm vi RUN thuộc về 1 chữ cái cụ
+ * thể (từ mốc "X." đến trước mốc chữ cái tiếp theo), giữ nguyên phần còn
+ * lại của đoạn.
+ */
+export function addUnderlineToOptionInParagraph(pXml: string, letter: string): string {
+  const runRe = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g
+  const runs: { xml: string; start: number; end: number; text: string }[] = []
+  let m: RegExpExecArray | null
+  while ((m = runRe.exec(pXml))) {
+    const wt = m[0].match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/)
+    runs.push({ xml: m[0], start: m.index, end: m.index + m[0].length, text: wt ? wt[1] : '' })
+  }
+  if (runs.length === 0) return pXml
+
+  const markerRunIdx: Record<string, number> = {}
+  runs.forEach((r, i) => {
+    const mm = r.text.match(/^\s*([A-Da-d])[.)]/)
+    if (mm) {
+      const key = mm[1].toUpperCase()
+      if (markerRunIdx[key] === undefined) markerRunIdx[key] = i
+    }
+  })
+
+  const target = letter.toUpperCase()
+  const startIdx = markerRunIdx[target]
+  if (startIdx === undefined) return pXml
+
+  let endIdx = runs.length
+  for (const l of ['A', 'B', 'C', 'D']) {
+    const idx = markerRunIdx[l]
+    if (l !== target && idx !== undefined && idx > startIdx && idx < endIdx) endIdx = idx
+  }
+
+  // Ghép lại chuỗi paragraph, chỉ thay các run trong phạm vi [startIdx, endIdx) bằng bản đã gạch chân — theo đúng vị trí index, tránh nhầm lẫn nếu có run trùng nội dung.
+  let result = ''
+  let cursor = 0
+  runs.forEach((r, i) => {
+    result += pXml.slice(cursor, r.start)
+    result += i >= startIdx && i < endIdx ? addUnderlineToParagraph(r.xml) : r.xml
+    cursor = r.end
+  })
+  result += pXml.slice(cursor)
+  return result
+}
+
+/** Dựng 1 đoạn văn nhãn (in đậm) hợp lệ về mặt XML để chèn vào giữa các đoạn khác — dùng chèn lại tiêu đề "Lời giải" đã bị bỏ khi tách. */
+export function buildLabelParagraph(text: string): RawParagraph {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return {
+    xml: `<w:p><w:pPr><w:rPr><w:b/></w:rPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escaped}</w:t></w:r></w:p>`,
+    plainText: text,
+  }
 }
 
 const QUESTION_NUM_RE = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)/i
@@ -148,6 +226,38 @@ export function splitRawSolution(paragraphs: RawParagraph[]): { question: RawPar
 
 export function isOptionText(text: string): boolean {
   return /^\s*[A-Da-d][.)]\s*\S/.test(text)
+}
+
+export interface OptionRef {
+  letter: string
+  paragraph: RawParagraph
+  text: string // đúng đoạn chữ của riêng phương án này (để gửi AI đọc), có thể trùng nguồn paragraph với option khác
+}
+
+const INLINE_OPTION_RE = /(?:^|\s)([A-Da-d])[.)]\s*(?=\S)/g
+
+/**
+ * Một đoạn văn có thể chứa 1 phương án (mỗi phương án riêng 1 <w:p>) hoặc
+ * gộp cả 4 phương án chung 1 <w:p> (ngăn cách bằng tab) — hàm này liệt kê
+ * RÕ TỪNG phương án kèm chữ cái, dù có thể trỏ chung 1 paragraph gốc.
+ */
+export function splitOptionParagraphs(paragraphs: RawParagraph[]): OptionRef[] {
+  const refs: OptionRef[] = []
+  for (const p of paragraphs) {
+    if (!isOptionText(p.plainText)) continue
+    const marks: { letter: string; index: number }[] = []
+    let m: RegExpExecArray | null
+    INLINE_OPTION_RE.lastIndex = 0
+    while ((m = INLINE_OPTION_RE.exec(p.plainText))) {
+      marks.push({ letter: m[1], index: m.index + m[0].indexOf(m[1]) })
+    }
+    if (marks.length === 0) continue
+    marks.forEach((mk, i) => {
+      const end = i + 1 < marks.length ? marks[i + 1].index : p.plainText.length
+      refs.push({ letter: mk.letter.toUpperCase(), paragraph: p, text: p.plainText.slice(mk.index, end).trim() })
+    })
+  }
+  return refs
 }
 
 /** Với mỗi số câu, gộp lại đúng phần câu hỏi + lời giải hiệu lực (dù nằm ngay trong hay tách rời ở cuối file) — dùng chung cho cả 2 công cụ (ghép lời giải, và chuẩn bị dữ liệu cho AI xác định đáp án đúng). */
@@ -215,7 +325,12 @@ export function spliceAttachSolutions(paragraphs: RawParagraph[]): RawParagraph[
 
     finalParagraphs.push(...question)
     const finalSolution = solution.length > 0 ? solution : detachedSolutionByNumber.get(occ.number) || []
-    if (finalSolution.length > 0) finalParagraphs.push(...finalSolution)
+    if (finalSolution.length > 0) {
+      // Nhãn "Lời giải" bị bỏ đi lúc tách (chỉ dùng để NHẬN DIỆN ranh giới,
+      // không giữ lại) — chèn lại 1 đoạn nhãn mới ở đây cho rõ ràng.
+      finalParagraphs.push(buildLabelParagraph('Lời giải'))
+      finalParagraphs.push(...finalSolution)
+    }
   }
 
   return finalParagraphs
