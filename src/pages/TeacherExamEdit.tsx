@@ -126,7 +126,8 @@ export default function TeacherExamEdit() {
       const needReview = result.questions.filter((q) => q.needsReview).length
       if (needReview > 0) notices.push(`${needReview} câu cần rà lại đáp án/công thức — xem nhãn "⚠" bên dưới.`)
       setParseNotice(notices.join(' '))
-      setPreviewMode(true)
+      // Không tự chuyển sang "Xem trước" — vào thẳng chế độ chỉnh sửa
+      // (có ô sửa nội dung + dán/chèn ảnh ngay).
     } catch (err: any) {
       setParseNotice(`Lỗi khi đọc file Word: ${err.message || err}`)
     } finally {

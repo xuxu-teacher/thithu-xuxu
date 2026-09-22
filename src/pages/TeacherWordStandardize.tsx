@@ -1,5 +1,7 @@
-import { ChangeEvent, useState } from 'react'
+import { ChangeEvent, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import jsPDF from 'jspdf'
+import html2canvas from 'html2canvas'
 import { parseGenericWordParagraphs } from '../utils/docxParser'
 import { standardizeIntoBlocks, QuestionBlock, isOptionLine } from '../utils/normalizeWord'
 import MathRenderer from '../components/MathRenderer'
@@ -11,8 +13,10 @@ export default function TeacherWordStandardize() {
   const [blankLines, setBlankLines] = useState(3)
   const [colorScheme, setColorScheme] = useState<ColorScheme>('black-on-white')
   const [processing, setProcessing] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const printRef = useRef<HTMLDivElement>(null)
 
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -45,8 +49,53 @@ export default function TeacherWordStandardize() {
     setBlocks((prev) => (prev || []).filter((b) => b.id !== id))
   }
 
-  function handleExportPdf() {
-    window.print()
+  // Xuất PDF trực tiếp bằng html2canvas + jsPDF — chụp đúng màu nền/chữ
+  // đang hiển thị (không qua hộp thoại in của trình duyệt, nên không bị
+  // trình duyệt tự xóa màu nền, không có tiêu đề/ngày giờ trình duyệt tự
+  // chèn vào, không cần bấm thêm bước nào khác — bấm là tải file về luôn.
+  async function handleDownloadPdf() {
+    if (!printRef.current) return
+    setExporting(true)
+    try {
+      const node = printRef.current
+      const canvas = await html2canvas(node, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff',
+      })
+
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+      const pageWidthMm = pdf.internal.pageSize.getWidth()
+      const pageHeightMm = pdf.internal.pageSize.getHeight()
+
+      const pxPerMm = canvas.width / pageWidthMm
+      const pageHeightPx = Math.floor(pageHeightMm * pxPerMm)
+
+      let renderedPx = 0
+      let pageIndex = 0
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
+
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width = canvas.width
+        sliceCanvas.height = sliceHeightPx
+        const ctx = sliceCanvas.getContext('2d')!
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
+
+        const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
+        if (pageIndex > 0) pdf.addPage()
+        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, (sliceHeightPx / pxPerMm))
+
+        renderedPx += sliceHeightPx
+        pageIndex++
+      }
+
+      pdf.save(`${fileName || 'de-chuan-hoa'}.pdf`)
+    } catch (err: any) {
+      alert('Có lỗi khi xuất PDF: ' + (err.message || err))
+    } finally {
+      setExporting(false)
+    }
   }
 
   const isDark = colorScheme === 'white-on-green'
@@ -55,106 +104,94 @@ export default function TeacherWordStandardize() {
 
   return (
     <div className="container">
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #standardize-print-area, #standardize-print-area * { visibility: visible; }
-          #standardize-print-area {
-            position: absolute; top: 0; left: 0; width: 100%;
-            background: ${pageBg} !important;
-            color: ${textColor} !important;
-          }
-          @page { margin: 15mm; }
-        }
-      `}</style>
+      <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
+        ← Trang chủ giáo viên
+      </Link>
 
-      <div className="no-print">
-        <Link to="/teacher/dashboard" className="btn secondary" style={{ marginBottom: 16, display: 'inline-flex' }}>
-          ← Trang chủ giáo viên
-        </Link>
+      <div className="card">
+        <h2>📄 Chuẩn hóa Word</h2>
+        <p style={{ fontSize: 13 }}>
+          Tải lên bất kỳ file Word nào chứa các câu hỏi được đánh số "Câu 1", "Câu 2"... — hệ thống tự động{' '}
+          <b>xóa toàn bộ lời giải</b>, <b>tự tách các phương án A/B/C/D</b> nếu bị dính chung dòng với câu
+          hỏi, giữ nguyên câu hỏi và số liệu, chèn khoảng trắng giữa các câu để học sinh tự làm, rồi tải về
+          PDF trực tiếp.
+        </p>
 
-        <div className="card">
-          <h2>📄 Chuẩn hóa Word</h2>
-          <p style={{ fontSize: 13 }}>
-            Tải lên bất kỳ file Word nào chứa các câu hỏi được đánh số "Câu 1", "Câu 2"... — hệ thống tự động{' '}
-            <b>xóa toàn bộ lời giải</b>, <b>tự tách các phương án A/B/C/D</b> nếu bị dính chung dòng với câu
-            hỏi, giữ nguyên câu hỏi và số liệu, chèn khoảng trắng giữa các câu để học sinh tự làm, rồi xuất ra
-            PDF.
-          </p>
-
-          <label>Chọn file Word (.docx)</label>
-          <input type="file" accept=".docx" onChange={handleFile} disabled={processing} />
-          {processing && <p>Đang xử lý file...</p>}
-          {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
-
-          {blocks && (
-            <>
-              <label>Số dòng trống chèn giữa mỗi câu</label>
-              <input
-                type="number"
-                min={0}
-                max={50}
-                value={blankLines}
-                onChange={(e) => setBlankLines(Math.max(0, Math.min(50, Number(e.target.value))))}
-                style={{ maxWidth: 120 }}
-              />
-
-              <label>Màu văn bản</label>
-              <select value={colorScheme} onChange={(e) => setColorScheme(e.target.value as ColorScheme)}>
-                <option value="black-on-white">Nền trắng — chữ đen</option>
-                <option value="white-on-green">Nền xanh (bảng viết) — chữ trắng</option>
-              </select>
-
-              <button className="btn" onClick={handleExportPdf} style={{ marginTop: 12 }}>
-                🖨 Xuất PDF
-              </button>
-              <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Bấm xong, ở hộp thoại in của trình duyệt chọn máy in <b>"Save as PDF" / "Lưu dưới dạng PDF"</b>{' '}
-                thay vì in giấy thật.
-              </p>
-            </>
-          )}
-        </div>
+        <label>Chọn file Word (.docx)</label>
+        <input type="file" accept=".docx" onChange={handleFile} disabled={processing} />
+        {processing && <p>Đang xử lý file...</p>}
+        {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
 
         {blocks && (
-          <div className="card">
-            <h3>Rà lại từng câu trước khi xuất (sửa lỗi tách sai, xóa câu thừa)</h3>
-            {blocks.map((b) => (
-              <div className="question-block" key={b.id}>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => removeBlock(b.id)}>
-                    Xóa
-                  </button>
-                </div>
-                <textarea
-                  rows={Math.min(8, Math.max(2, b.lines.length))}
-                  value={b.lines.join('\n')}
-                  onChange={(e) => updateBlockText(b.id, e.target.value)}
-                />
-                <div className="card" style={{ background: '#fafbfe' }}>
-                  <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước:</b>
-                  {renderBlockPreview(b, '#111111')}
-                </div>
-              </div>
-            ))}
-          </div>
+          <>
+            <label>Số dòng trống chèn giữa mỗi câu</label>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={blankLines}
+              onChange={(e) => setBlankLines(Math.max(0, Math.min(50, Number(e.target.value))))}
+              style={{ maxWidth: 120 }}
+            />
+
+            <label>Màu văn bản</label>
+            <select value={colorScheme} onChange={(e) => setColorScheme(e.target.value as ColorScheme)}>
+              <option value="black-on-white">Nền trắng — chữ đen</option>
+              <option value="white-on-green">Nền xanh (bảng viết) — chữ trắng</option>
+            </select>
+
+            <button className="btn" onClick={handleDownloadPdf} disabled={exporting} style={{ marginTop: 12 }}>
+              {exporting ? '⏳ Đang tạo PDF...' : '⬇ Tải về PDF'}
+            </button>
+          </>
         )}
       </div>
 
       {blocks && (
-        <div id="standardize-print-area" className="card" style={{ background: pageBg, color: textColor, padding: 24 }}>
-          {fileName && <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>}
+        <div className="card">
+          <h3>Rà lại từng câu trước khi tải (sửa lỗi tách sai, xóa câu thừa)</h3>
           {blocks.map((b) => (
-            <div key={b.id}>
-              {renderBlockPreview(b, textColor)}
-              {isQuestionStart(b) &&
-                Array.from({ length: blankLines }).map((_, k) => (
-                  <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
-                    &nbsp;
-                  </p>
-                ))}
+            <div className="question-block" key={b.id}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => removeBlock(b.id)}>
+                  Xóa
+                </button>
+              </div>
+              <textarea
+                rows={Math.min(8, Math.max(2, b.lines.length))}
+                value={b.lines.join('\n')}
+                onChange={(e) => updateBlockText(b.id, e.target.value)}
+              />
+              <div className="card" style={{ background: '#fafbfe' }}>
+                <b style={{ fontSize: 11, color: 'var(--muted)' }}>Xem trước:</b>
+                {renderBlockPreview(b, '#111111')}
+              </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {blocks && (
+        <div style={{ position: 'absolute', left: -9999, top: 0 }}>
+          {/* Vùng dựng nội dung để chụp xuất PDF — luôn tồn tại trong DOM, chỉ đẩy ra ngoài màn hình
+              (không dùng display:none / height:0 để html2canvas vẫn đọc đúng kích thước/màu sắc thật). */}
+          <div
+            ref={printRef}
+            style={{ width: '794px', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}
+          >
+            {fileName && <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>}
+            {blocks.map((b) => (
+              <div key={b.id}>
+                {renderBlockPreview(b, textColor)}
+                {isQuestionStart(b) &&
+                  Array.from({ length: blankLines }).map((_, k) => (
+                    <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
+                      &nbsp;
+                    </p>
+                  ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

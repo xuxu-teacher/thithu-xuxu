@@ -83,7 +83,9 @@ export default function TeacherExamCreate() {
         notices.push(`Đã chuyển đổi ${result.mathTypeConvertedCount} công thức MathType sang LaTeX qua máy chủ đã cấu hình.`)
       }
       setParseNotice(notices.join(' '))
-      setPreviewMode(true) // tự động xem trước ngay sau khi tải file lên, để rà công thức lỗi trước khi lưu
+      // Không tự chuyển sang "Xem trước" nữa — vào thẳng chế độ chỉnh sửa
+      // (có ô sửa nội dung + dán/chèn ảnh ngay), tránh gây hiểu nhầm là
+      // thiếu nút sửa. Bấm "👁 Xem trước toàn bộ đề" khi cần rà công thức.
     } catch (err: any) {
       setParseNotice(`Lỗi khi đọc file Word: ${err.message || err}`)
     } finally {

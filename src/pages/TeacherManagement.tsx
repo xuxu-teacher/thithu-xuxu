@@ -1,5 +1,6 @@
 import { ChangeEvent, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { v4 as uuid } from 'uuid'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import { DOCUMENT_CATEGORIES } from '../data/documentCategories'
@@ -9,17 +10,48 @@ import {
   getDocumentSignedUrl,
   deleteTeacherDocument,
 } from '../utils/teacherDocuments'
-import { TeacherDocument, TuitionApplication } from '../types'
+import {
+  getTeacherDisclosure,
+  saveTeacherDisclosure,
+  listScheduleRows,
+  saveScheduleRow,
+  deleteScheduleRow,
+} from '../utils/teacherDisclosure'
+import ScheduleTable from '../components/ScheduleTable'
+import { TeacherDocument, TuitionApplication, TeacherDisclosure, TeacherScheduleRow } from '../types'
+
+const emptyDisclosure = (teacherId: string): TeacherDisclosure => ({
+  teacher_id: teacherId,
+  business_name: '',
+  address: '',
+  phone: '',
+  school_year: '',
+  subjects_info: '',
+  teaching_form: '',
+  tuition_rates: '',
+  teacher_honorific: 'Cô',
+  teacher_display_name: '',
+  teacher_degree: '',
+  teacher_major: '',
+  teacher_workplace: '',
+  principal_school_name: '',
+  report_teaching_time: '',
+})
 
 export default function TeacherManagement() {
   const { teacher } = useAuth()
   const [docs, setDocs] = useState<TeacherDocument[]>([])
   const [applications, setApplications] = useState<TuitionApplication[]>([])
   const [loading, setLoading] = useState(true)
-  const [mode, setMode] = useState<'docs' | 'applications'>('docs')
+  const [mode, setMode] = useState<'docs' | 'applications' | 'disclosure'>('docs')
   const [activeCategory, setActiveCategory] = useState(DOCUMENT_CATEGORIES[0].key)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [disclosure, setDisclosure] = useState<TeacherDisclosure | null>(null)
+  const [scheduleRows, setScheduleRows] = useState<TeacherScheduleRow[]>([])
+  const [savingDisclosure, setSavingDisclosure] = useState(false)
+  const [disclosureSavedNote, setDisclosureSavedNote] = useState<string | null>(null)
 
   async function reload() {
     setLoading(true)
@@ -36,9 +68,72 @@ export default function TeacherManagement() {
     if (teacher) reload()
   }, [teacher])
 
+  useEffect(() => {
+    async function loadDisclosure() {
+      if (!teacher || disclosure) return
+      const d = await getTeacherDisclosure(teacher.id)
+      setDisclosure(d || emptyDisclosure(teacher.id))
+      setScheduleRows(await listScheduleRows(teacher.id))
+    }
+    if (mode === 'disclosure') loadDisclosure()
+  }, [mode, teacher])
+
   async function handleToggleReviewed(id: string, reviewed: boolean) {
     setApplications((prev) => prev.map((a) => (a.id === id ? { ...a, reviewed } : a)))
     await supabase.from('tuition_applications').update({ reviewed }).eq('id', id)
+  }
+
+  function updateDisclosure(patch: Partial<TeacherDisclosure>) {
+    setDisclosure((d) => (d ? { ...d, ...patch } : d))
+  }
+
+  async function handleSaveDisclosure() {
+    if (!disclosure) return
+    setSavingDisclosure(true)
+    try {
+      await saveTeacherDisclosure(disclosure)
+      setDisclosureSavedNote('✅ Đã lưu.')
+      setTimeout(() => setDisclosureSavedNote(null), 3000)
+    } catch (err: any) {
+      alert('Lỗi khi lưu: ' + err.message)
+    } finally {
+      setSavingDisclosure(false)
+    }
+  }
+
+  function addScheduleRow() {
+    setScheduleRows((prev) => [...prev, { id: uuid(), teacher_id: teacher!.id, class_label: '', order_index: prev.length }])
+  }
+
+  async function persistScheduleRow(row: TeacherScheduleRow) {
+    try {
+      await saveScheduleRow(row)
+    } catch (err: any) {
+      alert('Lỗi khi lưu dòng thời khóa biểu: ' + err.message)
+    }
+  }
+
+  function changeScheduleLabel(rowId: string, value: string) {
+    setScheduleRows((prev) => {
+      const next = prev.map((r) => (r.id === rowId ? { ...r, class_label: value } : r))
+      const row = next.find((r) => r.id === rowId)
+      if (row) persistScheduleRow(row)
+      return next
+    })
+  }
+
+  function changeScheduleCell(rowId: string, day: string, value: string) {
+    setScheduleRows((prev) => {
+      const next = prev.map((r) => (r.id === rowId ? { ...r, [day]: value } : r))
+      const row = next.find((r) => r.id === rowId)
+      if (row) persistScheduleRow(row)
+      return next
+    })
+  }
+
+  async function removeScheduleRow(rowId: string) {
+    setScheduleRows((prev) => prev.filter((r) => r.id !== rowId))
+    await deleteScheduleRow(rowId)
   }
 
   async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -101,10 +196,83 @@ export default function TeacherManagement() {
           <button type="button" className={`btn ${mode === 'applications' ? '' : 'secondary'}`} onClick={() => setMode('applications')}>
             👪 Đơn xin học thêm của học sinh{applications.filter((a) => !a.reviewed).length > 0 && ` (${applications.filter((a) => !a.reviewed).length} mới)`}
           </button>
+          <button type="button" className={`btn ${mode === 'disclosure' ? '' : 'secondary'}`} onClick={() => setMode('disclosure')}>
+            📋 Kê khai thông tin dạy
+          </button>
         </div>
       </div>
 
-      {mode === 'applications' ? (
+      {mode === 'disclosure' && disclosure && (
+        <>
+          <div className="card">
+            <h3>Thông tin cơ sở dạy thêm</h3>
+            <p style={{ fontSize: 13 }}>Nội dung này hiển thị công khai cho học sinh xem ở trang học sinh.</p>
+
+            <label>Tên hộ kinh doanh / cơ sở dạy thêm</label>
+            <input value={disclosure.business_name || ''} onChange={(e) => updateDisclosure({ business_name: e.target.value })} placeholder="VD: HỘ KINH DOANH UYÊN THƠ" />
+
+            <label>Địa chỉ</label>
+            <input value={disclosure.address || ''} onChange={(e) => updateDisclosure({ address: e.target.value })} />
+
+            <label>Số điện thoại</label>
+            <input value={disclosure.phone || ''} onChange={(e) => updateDisclosure({ phone: e.target.value })} />
+
+            <label>Năm học</label>
+            <input value={disclosure.school_year || ''} onChange={(e) => updateDisclosure({ school_year: e.target.value })} placeholder="VD: 2026-2027" />
+
+            <label>Danh xưng (dùng để ghép câu trong đơn đăng ký)</label>
+            <select value={disclosure.teacher_honorific || 'Cô'} onChange={(e) => updateDisclosure({ teacher_honorific: e.target.value })}>
+              <option value="Thầy">Thầy</option>
+              <option value="Cô">Cô</option>
+            </select>
+
+            <label>Tên hiển thị (trong đơn/kê khai)</label>
+            <input value={disclosure.teacher_display_name || teacher?.full_name || ''} onChange={(e) => updateDisclosure({ teacher_display_name: e.target.value })} />
+
+            <label>Các môn/khối tổ chức dạy thêm</label>
+            <textarea rows={3} value={disclosure.subjects_info || ''} onChange={(e) => updateDisclosure({ subjects_info: e.target.value })} placeholder={'VD:\n+ Lớp Toán 10, Chương trình giáo dục phổ thông\n+ Lớp Toán 11, Chương trình giáo dục phổ thông'} />
+
+            <label>Hình thức tổ chức dạy thêm, học thêm</label>
+            <textarea rows={2} value={disclosure.teaching_form || ''} onChange={(e) => updateDisclosure({ teaching_form: e.target.value })} />
+
+            <label>Mức thu tiền học thêm</label>
+            <textarea rows={2} value={disclosure.tuition_rates || ''} onChange={(e) => updateDisclosure({ tuition_rates: e.target.value })} placeholder={'VD: 300.000đ/01 tháng/01 HS - Tuần 2 buổi'} />
+          </div>
+
+          <div className="card">
+            <h3>Thời khóa biểu (linh hoạt — tự thêm/xóa dòng, tự sửa từng ô)</h3>
+            <ScheduleTable rows={scheduleRows} editable onChangeCell={changeScheduleCell} onChangeLabel={changeScheduleLabel} onDeleteRow={removeScheduleRow} />
+            <button type="button" className="btn secondary" onClick={addScheduleRow} style={{ marginTop: 10 }}>
+              + Thêm dòng
+            </button>
+          </div>
+
+          <div className="card">
+            <h3>Thông tin người dạy (bản thân)</h3>
+            <label>Trình độ chuyên môn</label>
+            <input value={disclosure.teacher_degree || ''} onChange={(e) => updateDisclosure({ teacher_degree: e.target.value })} placeholder="VD: Thạc sỹ" />
+            <label>Chuyên ngành đào tạo</label>
+            <input value={disclosure.teacher_major || ''} onChange={(e) => updateDisclosure({ teacher_major: e.target.value })} placeholder="VD: Toán" />
+            <label>Đơn vị công tác</label>
+            <input value={disclosure.teacher_workplace || ''} onChange={(e) => updateDisclosure({ teacher_workplace: e.target.value })} placeholder="VD: THPT số 1 Tư Nghĩa" />
+          </div>
+
+          <div className="card">
+            <h3>Báo cáo Hiệu trưởng</h3>
+            <label>Kính gửi Hiệu trưởng trường</label>
+            <input value={disclosure.principal_school_name || ''} onChange={(e) => updateDisclosure({ principal_school_name: e.target.value })} placeholder="VD: Trường THPT số 1 Tư Nghĩa" />
+            <label>Thời gian dạy thêm (để báo cáo)</label>
+            <textarea rows={2} value={disclosure.report_teaching_time || ''} onChange={(e) => updateDisclosure({ report_teaching_time: e.target.value })} />
+          </div>
+
+          <button className="btn" onClick={handleSaveDisclosure} disabled={savingDisclosure}>
+            {savingDisclosure ? 'Đang lưu...' : 'Lưu kê khai'}
+          </button>
+          {disclosureSavedNote && <span style={{ marginLeft: 10, color: 'green' }}>{disclosureSavedNote}</span>}
+        </>
+      )}
+
+      {mode === 'applications' && (
         <div className="card">
           <h3>Đơn xin học thêm của học sinh</h3>
           {loading ? (
@@ -154,7 +322,9 @@ export default function TeacherManagement() {
             </table>
           )}
         </div>
-      ) : (
+      )}
+
+      {mode === 'docs' && (
       <div className="card">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
           {DOCUMENT_CATEGORIES.map((c) => (

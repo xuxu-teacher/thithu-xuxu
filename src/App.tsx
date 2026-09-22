@@ -16,7 +16,6 @@ import TeacherQuestionBankUpload from './pages/TeacherQuestionBankUpload'
 import TeacherExamFromMatrix from './pages/TeacherExamFromMatrix'
 import TeacherExamCreateHub from './pages/TeacherExamCreateHub'
 import TeacherManagement from './pages/TeacherManagement'
-import TeacherDisclosurePage from './pages/TeacherDisclosurePage'
 import TeacherWordStandardize from './pages/TeacherWordStandardize'
 import StudentDisclosurePage from './pages/StudentDisclosurePage'
 import StudentTuitionApplication from './pages/StudentTuitionApplication'
@@ -140,14 +139,6 @@ export default function App() {
           element={
             <TeacherRoute>
               <TeacherWordStandardize />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/disclosure"
-          element={
-            <TeacherRoute>
-              <TeacherDisclosurePage />
             </TeacherRoute>
           }
         />
