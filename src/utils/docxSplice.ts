@@ -245,6 +245,19 @@ export function groupRawByQuestionMarker(paragraphs: RawParagraph[]): RawOccurre
   return occurrences
 }
 
+/**
+ * Nhận diện 1 dòng "Câu N" TRƠN, không có nội dung câu hỏi thật đi kèm
+ * (VD "Câu 1." hoặc "Câu 1:" mà không có gì phía sau) — dấu hiệu đây là
+ * lần LẶP LẠI chỉ để dẫn vào lời giải (kiểu file đề+đáp án tách rời), chứ
+ * không phải 1 câu hỏi thật (câu trả lời ngắn thường viết gọn cả câu hỏi
+ * trong ĐÚNG 1 dòng — không được coi nhầm là "chỉ có lời giải" chỉ vì ít
+ * dòng).
+ */
+function isBareQuestionMarker(text: string): boolean {
+  const stripped = text.replace(QUESTION_NUM_RE, '').trim()
+  return stripped.length === 0 || /^[.:]+$/.test(stripped)
+}
+
 /** Trong 1 occurrence, tách thành phần "câu hỏi" (trước dòng Lời giải) và "lời giải" (từ đó trở đi) — tự loại bỏ các dòng rác (ghi công tác giả/phản biện...) khỏi phần lời giải. */
 export function splitRawSolution(paragraphs: RawParagraph[]): { question: RawParagraph[]; solution: RawParagraph[] } {
   const question: RawParagraph[] = []
@@ -364,7 +377,7 @@ export function buildQuestionMap(
 
   const detachedSolutionByNumber = new Map<number, RawParagraph[]>()
   for (const { occ, question, solution } of split) {
-    const isSolutionOnly = occ.number !== null && question.length <= 1 && solution.length > 0
+    const isSolutionOnly = occ.number !== null && question.length === 1 && isBareQuestionMarker(question[0].plainText) && solution.length > 0
     if (isSolutionOnly) {
       const existing = detachedSolutionByNumber.get(occ.number!) || []
       detachedSolutionByNumber.set(occ.number!, [...existing, ...solution])
@@ -374,7 +387,7 @@ export function buildQuestionMap(
   const map = new Map<number, { question: RawParagraph[]; solution: RawParagraph[] }>()
   for (const { occ, question, solution } of split) {
     if (occ.number === null) continue
-    const isSolutionOnly = question.length <= 1 && solution.length > 0
+    const isSolutionOnly = question.length === 1 && isBareQuestionMarker(question[0].plainText) && solution.length > 0
     if (isSolutionOnly) continue
     if (map.has(occ.number)) continue
     const finalSolution = solution.length > 0 ? solution : detachedSolutionByNumber.get(occ.number) || []
@@ -416,7 +429,7 @@ export function spliceAttachSolutions(
   // Lượt 1: gom các occurrence "chỉ có lời giải" (câu hỏi rỗng, tách riêng ở cuối file) theo đúng số câu.
   const detachedSolutionByNumber = new Map<number, RawParagraph[]>()
   for (const { occ, question, solution } of split) {
-    const isSolutionOnly = occ.number !== null && question.length <= 1 && solution.length > 0
+    const isSolutionOnly = occ.number !== null && question.length === 1 && isBareQuestionMarker(question[0].plainText) && solution.length > 0
     if (isSolutionOnly) {
       const existing = detachedSolutionByNumber.get(occ.number!) || []
       detachedSolutionByNumber.set(occ.number!, [...existing, ...solution])
@@ -429,7 +442,7 @@ export function spliceAttachSolutions(
   const seenNumbers = new Set<number>()
 
   for (const { occ, question, solution } of split) {
-    const isSolutionOnly = occ.number !== null && question.length <= 1 && solution.length > 0
+    const isSolutionOnly = occ.number !== null && question.length === 1 && isBareQuestionMarker(question[0].plainText) && solution.length > 0
     if (isSolutionOnly) continue // đã gộp vào đúng câu gốc, bỏ qua vị trí gốc của nó
 
     if (occ.number === null) {
