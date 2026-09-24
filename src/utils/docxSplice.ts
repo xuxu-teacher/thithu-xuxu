@@ -177,9 +177,15 @@ export function buildLabelParagraph(text: string): RawParagraph {
 }
 
 const QUESTION_NUM_RE = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)/i
+// Cho phép có dấu # hoặc ký tự trang trí đứng trước (VD "#Lời giải" gặp ở
+// một số file sưu tầm từ nhóm chia sẻ đề).
 const SOLUTION_RE =
-  /^\s*(Lời giải|LỜI GIẢI|Hướng dẫn giải|HƯỚNG DẪN GIẢI|Giải\s*:|Đáp án\s*:|Lời giải chi tiết|Trả lời)\s*:?\s*$/i
+  /^\s*[#*~]*\s*(Lời giải|LỜI GIẢI|Hướng dẫn giải|HƯỚNG DẪN GIẢI|Giải\s*:|Đáp án\s*:|Lời giải chi tiết|Trả lời)\s*:?\s*$/i
 const SKIP_HEADING_RE = /^\s*(ĐÁP ÁN|Đáp án|BẢNG ĐÁP ÁN)\s*$/i
+// Các dòng "rác" hay gặp trong lời giải sưu tầm từ nhóm chia sẻ đề (ghi
+// công tác giả/phản biện...) — không phải nội dung hướng dẫn giải thật,
+// tự động loại bỏ khi ghép lời giải.
+const JUNK_LINE_RE = /^\s*(FB\s*(tác giả|phản biện)|Facebook\s*(tác giả|phản biện)|Người\s*(ra đề|phản biện))\s*:/i
 
 export interface RawOccurrence {
   number: number | null
@@ -210,7 +216,7 @@ export function groupRawByQuestionMarker(paragraphs: RawParagraph[]): RawOccurre
   return occurrences
 }
 
-/** Trong 1 occurrence, tách thành phần "câu hỏi" (trước dòng Lời giải) và "lời giải" (từ đó trở đi). */
+/** Trong 1 occurrence, tách thành phần "câu hỏi" (trước dòng Lời giải) và "lời giải" (từ đó trở đi) — tự loại bỏ các dòng rác (ghi công tác giả/phản biện...) khỏi phần lời giải. */
 export function splitRawSolution(paragraphs: RawParagraph[]): { question: RawParagraph[]; solution: RawParagraph[] } {
   const question: RawParagraph[] = []
   const solution: RawParagraph[] = []
@@ -222,8 +228,12 @@ export function splitRawSolution(paragraphs: RawParagraph[]): { question: RawPar
       inSol = true
       continue
     }
-    if (inSol) solution.push(p)
-    else question.push(p)
+    if (inSol) {
+      if (JUNK_LINE_RE.test(text)) continue
+      solution.push(p)
+    } else {
+      question.push(p)
+    }
   }
   return { question, solution }
 }
@@ -352,6 +362,7 @@ export function buildQuestionMap(
 export function spliceAttachSolutions(
   paragraphs: RawParagraph[],
   shortAnswerByNumber?: Map<number, string>,
+  answerLabel: string = 'Đáp án',
 ): RawParagraph[] {
   const occurrences = groupRawByQuestionMarker(paragraphs)
   const split = occurrences.map((occ) => ({ occ, ...splitRawSolution(occ.paragraphs) }))
@@ -388,7 +399,7 @@ export function spliceAttachSolutions(
     // "Đáp án: ..." NGAY GIỮA đề và "Lời giải", đúng theo mẫu chuẩn.
     const answerText = shortAnswerByNumber?.get(occ.number)
     if (answerText) {
-      finalParagraphs.push(buildLabelParagraph(`Đáp án: ${answerText}`))
+      finalParagraphs.push(buildLabelParagraph(`${answerLabel}: ${answerText}`))
     }
 
     const finalSolution = solution.length > 0 ? solution : detachedSolutionByNumber.get(occ.number) || []

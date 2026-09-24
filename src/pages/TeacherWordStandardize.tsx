@@ -184,8 +184,14 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
 }
 
 // ============================================================
-// KHỐI — Xuống dòng phương án — tải về file Word
+// KHỐI — Chuẩn hóa đề cho Kho câu hỏi — tải về file Word
 // ============================================================
+// Gộp toàn bộ các bước cần thiết để 1 file sưu tầm (định dạng lộn xộn)
+// trở thành đúng chuẩn có thể tải lên "Kho câu hỏi" cho hệ thống tự tách
+// và phân loại câu hỏi: xuống dòng phương án, gạch chân đáp án đúng
+// (trắc nghiệm + Đúng/Sai), chèn "Đáp số" cho câu trả lời ngắn, và dọn
+// sạch phần lời giải (bỏ dòng ghi công tác giả/phản biện... không phải
+// nội dung giải thật).
 function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName: string; onError: (e: string | null) => void }) {
   const [working, setWorking] = useState(false)
   const [doneNote, setDoneNote] = useState<string | null>(null)
@@ -196,14 +202,23 @@ function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName:
     setDoneNote(null)
     try {
       const raw = await loadRawDocx(file)
-      const split = splitOptionsIntoOwnParagraphs(raw.paragraphs)
-      const addedCount = split.length - raw.paragraphs.length
-      const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, split.map((p) => p.xml))
-      downloadBlob(blob, `${fileName || 'de'}-xuong-dong-phuong-an.docx`)
+
+      // 1) Xác định đáp án đúng (Chọn X / AI) và gạch chân — làm trước khi
+      // tách dòng/ghép lại, lúc cấu trúc câu hỏi còn nguyên như file gốc.
+      const { underlineTargets, shortAnswers } = await autoDetectCorrectRawParagraphs(raw.paragraphs)
+      const underlined = applyUnderlineToParagraphs(raw.paragraphs, underlineTargets)
+
+      // 2) Tách phương án dính chung dòng xuống dòng riêng.
+      const withNewlines = splitOptionsIntoOwnParagraphs(underlined)
+
+      // 3) Ghép lời giải vào đúng câu (đã tự lọc dòng rác), chèn "Đáp số" cho câu trả lời ngắn.
+      const shortAnswerMap = new Map(shortAnswers.map((s) => [s.number, s.answerText]))
+      const merged = spliceAttachSolutions(withNewlines, shortAnswerMap, 'Đáp số')
+
+      const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, merged.map((p) => p.xml))
+      downloadBlob(blob, `${fileName || 'de'}-chuan-hoa-kho-de.docx`)
       setDoneNote(
-        addedCount > 0
-          ? `✅ Đã tách phương án xuống dòng riêng (thêm ${addedCount} dòng) và tải file Word về.`
-          : '✅ File không có phương án nào bị dính chung dòng — tải file về giữ nguyên.',
+        `✅ Đã xuống dòng phương án, gạch chân ${underlineTargets.length} đáp án, thêm ${shortAnswers.length} dòng "Đáp số", dọn lời giải và tải file Word về — sẵn sàng tải lên Kho câu hỏi.`,
       )
     } catch (err: any) {
       onError(err.message || 'Có lỗi khi xử lý.')
@@ -214,14 +229,14 @@ function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName:
 
   return (
     <div className="card" style={{ border: '1px solid #c7d2fe' }}>
-      <h3>↵ Xuống dòng phương án — tải về file Word</h3>
+      <h3>↵ Chuẩn hóa đề cho Kho câu hỏi — tải về file Word</h3>
       <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        Áp dụng cho cả trắc nghiệm 4 lựa chọn (A/B/C/D) và Đúng/Sai (a/b/c/d) — nếu các phương án đang dính
-        chung 1 dòng với câu hỏi hoặc với nhau, tự động tách mỗi phương án xuống 1 dòng riêng, giữ nguyên định
-        dạng gốc của từng phần chữ.
+        Làm 1 lần đủ mọi bước để file sẵn sàng tải lên "Kho câu hỏi": tự xuống dòng phương án (áp dụng cho cả
+        trắc nghiệm 4 lựa chọn và Đúng/Sai), tự gạch chân đáp án đúng, tự chèn "Đáp số: ..." giữa đề và lời
+        giải cho câu trả lời ngắn, tự dọn sạch lời giải (bỏ dòng ghi công tác giả/phản biện...).
       </p>
       <button className="btn" onClick={handleRun} disabled={working}>
-        {working ? '⏳ Đang xử lý...' : '↵ Xuống dòng & Tải Word'}
+        {working ? '⏳ Đang xử lý...' : '↵ Chuẩn hóa & Tải Word'}
       </button>
       {doneNote && <p style={{ fontSize: 12.5, marginTop: 8 }}>{doneNote}</p>}
     </div>
