@@ -388,6 +388,23 @@ export function buildQuestionMap(
  * chuyển các đoạn lời giải (đang nằm tách riêng, đánh số lại ở cuối file)
  * về đúng ngay sau câu hỏi tương ứng.
  */
+const HUONG_DAN_GIAI_MARKER_RE = /^\s*HƯỚNG DẪN GIẢI\s*$/i
+
+/**
+ * Một số file trình bày đề 3 LẦN trong cùng 1 file: (1) đề + lời giải rút
+ * gọn dạng "#Lời giải" ngay sau mỗi câu, (2) mục "ĐÁP ÁN" chỉ có bảng chữ
+ * cái, (3) mục "HƯỚNG DẪN GIẢI" — bản đầy đủ nhất, đề và lời giải chi tiết
+ * đúng vị trí liền nhau. Nếu tìm thấy mục (3), CHỈ dùng từ đó trở đi làm
+ * nguồn duy nhất — bỏ hẳn phần đề gốc và phần đáp án phía trước (tránh
+ * nhầm lẫn số câu do "PHẦN..." bị lặp lại nhiều lần, và tránh sót nội
+ * dung/hình ảnh do xử lý nhầm 2 bản trùng lặp phía trước).
+ */
+export function extractHuongDanGiaiSection(paragraphs: RawParagraph[]): RawParagraph[] | null {
+  const idx = paragraphs.findIndex((p) => HUONG_DAN_GIAI_MARKER_RE.test(p.plainText.trim()))
+  if (idx === -1) return null
+  return paragraphs.slice(idx + 1)
+}
+
 export function spliceAttachSolutions(
   paragraphs: RawParagraph[],
   shortAnswerByNumber?: Map<number, string>,

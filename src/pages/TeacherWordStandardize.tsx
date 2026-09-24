@@ -10,6 +10,7 @@ import {
   applyUnderlineToParagraphs,
   spliceAttachSolutions,
   splitOptionsIntoOwnParagraphs,
+  extractHuongDanGiaiSection,
   downloadBlob,
   RawParagraph,
 } from '../utils/docxSplice'
@@ -203,10 +204,17 @@ function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName:
     try {
       const raw = await loadRawDocx(file)
 
+      // 0) Nếu file có mục "HƯỚNG DẪN GIẢI" riêng (đề bị lặp lại nhiều lần
+      // trong cùng file — kiểu đề gốc + bảng đáp án + hướng dẫn giải đầy đủ)
+      // thì CHỈ dùng đúng phần đó làm nguồn duy nhất, bỏ hẳn phần đề gốc và
+      // đáp án phía trước.
+      const huongDanSection = extractHuongDanGiaiSection(raw.paragraphs)
+      const sourceParagraphs = huongDanSection || raw.paragraphs
+
       // 1) Xác định đáp án đúng (Chọn X / AI) và gạch chân — làm trước khi
       // tách dòng/ghép lại, lúc cấu trúc câu hỏi còn nguyên như file gốc.
-      const { underlineTargets, shortAnswers } = await autoDetectCorrectRawParagraphs(raw.paragraphs)
-      const underlined = applyUnderlineToParagraphs(raw.paragraphs, underlineTargets)
+      const { underlineTargets, shortAnswers } = await autoDetectCorrectRawParagraphs(sourceParagraphs)
+      const underlined = applyUnderlineToParagraphs(sourceParagraphs, underlineTargets)
 
       // 2) Tách phương án dính chung dòng xuống dòng riêng.
       const withNewlines = splitOptionsIntoOwnParagraphs(underlined)
@@ -218,7 +226,8 @@ function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName:
       const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, merged.map((p) => p.xml))
       downloadBlob(blob, `${fileName || 'de'}-chuan-hoa-kho-de.docx`)
       setDoneNote(
-        `✅ Đã xuống dòng phương án, gạch chân ${underlineTargets.length} đáp án, thêm ${shortAnswers.length} dòng "Đáp số", dọn lời giải và tải file Word về — sẵn sàng tải lên Kho câu hỏi.`,
+        (huongDanSection ? '✅ Phát hiện mục "HƯỚNG DẪN GIẢI" riêng — đã bỏ phần đề gốc/đáp án phía trước, chỉ dùng phần này. ' : '') +
+          `Đã xuống dòng phương án, gạch chân ${underlineTargets.length} đáp án, thêm ${shortAnswers.length} dòng "Đáp số", dọn lời giải và tải file Word về — sẵn sàng tải lên Kho câu hỏi.`,
       )
     } catch (err: any) {
       onError(err.message || 'Có lỗi khi xử lý.')
@@ -231,9 +240,10 @@ function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName:
     <div className="card" style={{ border: '1px solid #c7d2fe' }}>
       <h3>↵ Chuẩn hóa đề cho Kho câu hỏi — tải về file Word</h3>
       <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-        Làm 1 lần đủ mọi bước để file sẵn sàng tải lên "Kho câu hỏi": tự xuống dòng phương án (áp dụng cho cả
-        trắc nghiệm 4 lựa chọn và Đúng/Sai), tự gạch chân đáp án đúng, tự chèn "Đáp số: ..." giữa đề và lời
-        giải cho câu trả lời ngắn, tự dọn sạch lời giải (bỏ dòng ghi công tác giả/phản biện...).
+        Làm 1 lần đủ mọi bước để file sẵn sàng tải lên "Kho câu hỏi": nếu file có mục "HƯỚNG DẪN GIẢI" riêng
+        (đề bị lặp lại nhiều lần trong file), tự bỏ phần đề gốc/đáp án phía trước, chỉ giữ phần đó; tự xuống
+        dòng phương án (trắc nghiệm 4 lựa chọn và Đúng/Sai); tự gạch chân đáp án đúng; tự chèn "Đáp số: ..."
+        giữa đề và lời giải cho câu trả lời ngắn; tự dọn sạch lời giải (bỏ dòng ghi công tác giả/phản biện...).
       </p>
       <button className="btn" onClick={handleRun} disabled={working}>
         {working ? '⏳ Đang xử lý...' : '↵ Chuẩn hóa & Tải Word'}
