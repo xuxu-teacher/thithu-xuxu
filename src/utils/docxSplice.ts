@@ -30,6 +30,14 @@ function extractPlainText(pXml: string): string {
     .trim()
 }
 
+// Quét ở CẤP CAO NHẤT của <w:body>: mỗi khối là 1 ĐOẠN VĂN <w:p>...</w:p>
+// HOẶC 1 BẢNG <w:tbl>...</w:tbl> NGUYÊN VẸN — bảng KHÔNG bị tách thành các
+// đoạn văn bên trong (nếu tách, khung bảng <w:tbl>/<w:tr>/<w:tc> sẽ bị mất,
+// làm hỏng file). Vì regex thử các nhánh theo đúng thứ tự tại từng vị trí,
+// khi gặp "<w:tbl>" nó khớp trọn cả bảng, không bao giờ khớp riêng <w:p>
+// nằm bên trong ô bảng.
+const BLOCK_RE = /<w:tbl>[\s\S]*?<\/w:tbl>|<w:p\b[^>]*>[\s\S]*?<\/w:p>/g
+
 export async function loadRawDocx(
   file: File,
 ): Promise<{ zip: JSZip; documentXml: string; paragraphs: RawParagraph[] }> {
@@ -38,23 +46,26 @@ export async function loadRawDocx(
   const documentXml = await zip.file('word/document.xml')?.async('string')
   if (!documentXml) throw new Error('Không tìm thấy document.xml — file Word có thể bị hỏng.')
 
-  const pRe = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g
-  const matches = documentXml.match(pRe) || []
-  const paragraphs: RawParagraph[] = matches.map((xml) => ({ xml, plainText: extractPlainText(xml) }))
+  const matches = documentXml.match(BLOCK_RE) || []
+  const paragraphs: RawParagraph[] = matches.map((xml) =>
+    xml.startsWith('<w:tbl>')
+      ? { xml, plainText: '[BẢNG SỐ LIỆU]' } // giữ nguyên khối, không phân tích chữ bên trong — tránh khớp nhầm "Câu"/"Lời giải"/phương án nằm tình cờ trong ô bảng
+      : { xml, plainText: extractPlainText(xml) },
+  )
   return { zip, documentXml, paragraphs }
 }
 
-/** Đóng gói lại: thay thế TOÀN BỘ chuỗi đoạn văn gốc bằng danh sách XML mới (đã sắp xếp/sửa lại), giữ nguyên mọi phần khác của document.xml và mọi file khác trong zip. */
+/** Đóng gói lại: thay thế TOÀN BỘ chuỗi khối (đoạn văn + bảng) gốc bằng danh sách XML mới (đã sắp xếp/sửa lại), giữ nguyên mọi phần khác của document.xml và mọi file khác trong zip. */
 export async function repackDocxWithParagraphs(
   zip: JSZip,
   documentXml: string,
   newParagraphXmls: string[],
 ): Promise<Blob> {
-  const pRe = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g
   let m: RegExpExecArray | null
   let firstIdx = -1
   let lastEnd = -1
-  while ((m = pRe.exec(documentXml))) {
+  BLOCK_RE.lastIndex = 0
+  while ((m = BLOCK_RE.exec(documentXml))) {
     if (firstIdx === -1) firstIdx = m.index
     lastEnd = m.index + m[0].length
   }
