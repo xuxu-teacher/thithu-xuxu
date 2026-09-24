@@ -71,7 +71,7 @@ async function callDetectApi(payload: { key: string; questionText: string; optio
     }
     throw new Error(`Không tự động xác định đáp án được: ${detail}`)
   }
-  return (data?.results ?? []) as { key: string; correctIndices: number[] }[]
+  return (data?.results ?? []) as { key: string; correctIndices: number[]; answerText: string | null }[]
 }
 
 /**
@@ -96,17 +96,37 @@ export interface UnderlineTarget {
   letter: string
 }
 
-export async function autoDetectCorrectRawParagraphs(paragraphs: RawParagraph[]): Promise<UnderlineTarget[]> {
+export interface ShortAnswerResult {
+  number: number
+  answerText: string
+}
+
+export interface DetectionResult {
+  underlineTargets: UnderlineTarget[]
+  shortAnswers: ShortAnswerResult[]
+}
+
+export async function autoDetectCorrectRawParagraphs(paragraphs: RawParagraph[]): Promise<DetectionResult> {
   const qmap = buildQuestionMap(paragraphs)
   const targets: UnderlineTarget[] = []
+  const shortAnswers: ShortAnswerResult[] = []
 
   const payload: { key: string; questionText: string; optionLines: string[]; solutionText: string }[] = []
   const optionRefsByKey = new Map<string, OptionRef[]>()
 
   for (const [number, { question, solution }] of qmap) {
     const optionRefs = splitOptionParagraphs(question)
-    if (optionRefs.length === 0) continue
     const solutionText = solution.map((p) => p.plainText).join(' ')
+    const questionText = question.filter((p) => !isOptionText(p.plainText)).map((p) => p.plainText).join(' ')
+    const key = String(number)
+
+    if (optionRefs.length === 0) {
+      // Không có phương án -> câu trả lời ngắn, luôn cần AI đọc lời giải để rút đáp số.
+      if (solutionText.trim()) {
+        payload.push({ key, questionText, optionLines: [], solutionText })
+      }
+      continue
+    }
 
     // Chỉ áp dụng lối tắt "Chọn X" cho trắc nghiệm 1 đáp án (chữ hoa A-D) —
     // Đúng/Sai (chữ thường) luôn cần AI xét riêng từng ý.
@@ -120,21 +140,22 @@ export async function autoDetectCorrectRawParagraphs(paragraphs: RawParagraph[])
       }
     }
 
-    const questionText = question.filter((p) => !isOptionText(p.plainText)).map((p) => p.plainText).join(' ')
-    const key = String(number)
     payload.push({ key, questionText, optionLines: optionRefs.map((r) => r.text), solutionText })
     optionRefsByKey.set(key, optionRefs)
   }
 
-  if (payload.length === 0) return targets
+  if (payload.length === 0) return { underlineTargets: targets, shortAnswers }
 
   const results = await callDetectApi(payload)
   for (const r of results) {
     const optionRefs = optionRefsByKey.get(r.key)
-    if (!optionRefs) continue
-    for (const idx of r.correctIndices) {
-      if (optionRefs[idx]) targets.push({ paragraph: optionRefs[idx].paragraph, letter: optionRefs[idx].letter })
+    if (optionRefs) {
+      for (const idx of r.correctIndices) {
+        if (optionRefs[idx]) targets.push({ paragraph: optionRefs[idx].paragraph, letter: optionRefs[idx].letter })
+      }
+    } else if (r.answerText) {
+      shortAnswers.push({ number: Number(r.key), answerText: r.answerText })
     }
   }
-  return targets
+  return { underlineTargets: targets, shortAnswers }
 }

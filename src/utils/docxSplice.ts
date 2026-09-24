@@ -115,13 +115,24 @@ export function applyUnderlineToParagraphs(
   })
 }
 
-/**
- * Một số file gộp cả 4 phương án A/B/C/D chung 1 đoạn văn (ngăn cách bằng
- * tab) thay vì mỗi phương án 1 đoạn riêng — nếu gạch chân cả đoạn sẽ gạch
- * nhầm cả 4. Hàm này chỉ gạch chân đúng phạm vi RUN thuộc về 1 chữ cái cụ
- * thể (từ mốc "X." đến trước mốc chữ cái tiếp theo), giữ nguyên phần còn
- * lại của đoạn.
- */
+/** Tách 1 run thành "phần chữ cái mốc" (markerLen ký tự đầu, VD "b)") + "phần còn lại" — dùng để CHỈ gạch chân đúng chữ cái, không đụng cả câu. */
+function splitMarkerRun(runXml: string, markerLen: number): { markerXml: string; restXml: string } | null {
+  const rPrMatch = runXml.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)
+  const rPr = rPrMatch ? rPrMatch[0] : ''
+  const tMatch = runXml.match(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/)
+  if (!tMatch) return null
+  const attrs = tMatch[1]
+  const text = tMatch[2]
+  const markerText = text.slice(0, markerLen)
+  const restText = text.slice(markerLen)
+
+  const markerRPr = rPr ? rPr.replace('<w:rPr>', '<w:rPr><w:u w:val="single"/>') : '<w:rPr><w:u w:val="single"/></w:rPr>'
+  const markerXml = `<w:r>${markerRPr}<w:t${attrs} xml:space="preserve">${markerText}</w:t></w:r>`
+  const restXml = restText.length > 0 ? `<w:r>${rPr}<w:t${attrs} xml:space="preserve">${restText}</w:t></w:r>` : ''
+  return { markerXml, restXml }
+}
+
+/** Chỉ gạch chân ĐÚNG CHỮ CÁI mốc (VD "b)"), không gạch chân cả nội dung câu/ý phía sau nó. */
 export function addUnderlineToOptionInParagraph(pXml: string, letter: string): string {
   const runRe = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g
   const runs: { xml: string; start: number; end: number; text: string }[] = []
@@ -132,35 +143,24 @@ export function addUnderlineToOptionInParagraph(pXml: string, letter: string): s
   }
   if (runs.length === 0) return pXml
 
-  const markerRunIdx: Record<string, number> = {}
+  const markerRunIdx: Record<string, { idx: number; markerLen: number }> = {}
   runs.forEach((r, i) => {
-    const mm = r.text.match(/^\s*([A-Da-d])[.)]/)
+    const mm = r.text.match(/^(\s*[A-Da-d][.)])/)
     if (mm) {
-      const key = mm[1].toUpperCase()
-      if (markerRunIdx[key] === undefined) markerRunIdx[key] = i
+      const key = mm[1].trim()[0].toUpperCase()
+      if (markerRunIdx[key] === undefined) markerRunIdx[key] = { idx: i, markerLen: mm[1].length }
     }
   })
 
   const target = letter.toUpperCase()
-  const startIdx = markerRunIdx[target]
-  if (startIdx === undefined) return pXml
+  const info = markerRunIdx[target]
+  if (!info) return pXml
 
-  let endIdx = runs.length
-  for (const l of ['A', 'B', 'C', 'D']) {
-    const idx = markerRunIdx[l]
-    if (l !== target && idx !== undefined && idx > startIdx && idx < endIdx) endIdx = idx
-  }
+  const targetRun = runs[info.idx]
+  const split = splitMarkerRun(targetRun.xml, info.markerLen)
+  if (!split) return pXml
 
-  // Ghép lại chuỗi paragraph, chỉ thay các run trong phạm vi [startIdx, endIdx) bằng bản đã gạch chân — theo đúng vị trí index, tránh nhầm lẫn nếu có run trùng nội dung.
-  let result = ''
-  let cursor = 0
-  runs.forEach((r, i) => {
-    result += pXml.slice(cursor, r.start)
-    result += i >= startIdx && i < endIdx ? addUnderlineToParagraph(r.xml) : r.xml
-    cursor = r.end
-  })
-  result += pXml.slice(cursor)
-  return result
+  return pXml.slice(0, targetRun.start) + split.markerXml + split.restXml + pXml.slice(targetRun.end)
 }
 
 /** Dựng 1 đoạn văn nhãn (in đậm) hợp lệ về mặt XML để chèn vào giữa các đoạn khác — dùng chèn lại tiêu đề "Lời giải" đã bị bỏ khi tách. */
@@ -228,6 +228,58 @@ export function isOptionText(text: string): boolean {
   return /^\s*[A-Da-d][.)]\s*\S/.test(text)
 }
 
+/**
+ * Nếu 1 đoạn văn gộp nhiều phương án chung 1 dòng (A/B/C/D hoặc a/b/c/d
+ * dính liền) — tách thành NHIỀU đoạn văn riêng, mỗi đoạn 1 phương án,
+ * giữ nguyên toàn bộ định dạng của từng run (chỉ chia lại ranh giới
+ * đoạn, không đổi font/màu/công thức gì).
+ */
+export function splitOptionsIntoOwnParagraphs(paragraphs: RawParagraph[]): RawParagraph[] {
+  const result: RawParagraph[] = []
+
+  for (const p of paragraphs) {
+    if (!isOptionText(p.plainText)) {
+      result.push(p)
+      continue
+    }
+
+    const runRe = /<w:r\b[^>]*>[\s\S]*?<\/w:r>/g
+    const runs: { xml: string; start: number; end: number; text: string }[] = []
+    let m: RegExpExecArray | null
+    while ((m = runRe.exec(p.xml))) {
+      const wt = m[0].match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/)
+      runs.push({ xml: m[0], start: m.index, end: m.index + m[0].length, text: wt ? wt[1] : '' })
+    }
+
+    const markerIdx: { letter: string; runIdx: number }[] = []
+    runs.forEach((r, i) => {
+      const mm = r.text.match(/^\s*([A-Da-d])[.)]/)
+      if (mm) markerIdx.push({ letter: mm[1], runIdx: i })
+    })
+
+    if (markerIdx.length < 2 || runs.length === 0) {
+      result.push(p)
+      continue
+    }
+
+    // Lấy pPr (thuộc tính đoạn văn: căn lề, dãn dòng...) của đoạn gốc để dùng chung cho các đoạn mới, giữ đúng định dạng đoạn.
+    const pPrMatch = p.xml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)
+    const pPr = pPrMatch ? pPrMatch[0] : ''
+    const pOpenTag = p.xml.match(/^<w:p\b[^>]*>/)?.[0] || '<w:p>'
+
+    markerIdx.forEach((mk, i) => {
+      const startRun = mk.runIdx
+      const endRun = i + 1 < markerIdx.length ? markerIdx[i + 1].runIdx : runs.length
+      const runsXml = runs.slice(startRun, endRun).map((r) => r.xml).join('')
+      const newXml = `${pOpenTag}${pPr}${runsXml}</w:p>`
+      const newText = runs.slice(startRun, endRun).map((r) => r.text).join('')
+      result.push({ xml: newXml, plainText: newText })
+    })
+  }
+
+  return result
+}
+
 export interface OptionRef {
   letter: string
   paragraph: RawParagraph
@@ -293,7 +345,10 @@ export function buildQuestionMap(
  * chuyển các đoạn lời giải (đang nằm tách riêng, đánh số lại ở cuối file)
  * về đúng ngay sau câu hỏi tương ứng.
  */
-export function spliceAttachSolutions(paragraphs: RawParagraph[]): RawParagraph[] {
+export function spliceAttachSolutions(
+  paragraphs: RawParagraph[],
+  shortAnswerByNumber?: Map<number, string>,
+): RawParagraph[] {
   const occurrences = groupRawByQuestionMarker(paragraphs)
   const split = occurrences.map((occ) => ({ occ, ...splitRawSolution(occ.paragraphs) }))
 
@@ -324,6 +379,14 @@ export function spliceAttachSolutions(paragraphs: RawParagraph[]): RawParagraph[
     seenNumbers.add(occ.number)
 
     finalParagraphs.push(...question)
+
+    // Câu trả lời ngắn (không có phương án A/B/C/D hay a/b/c/d) -> chèn dòng
+    // "Đáp án: ..." NGAY GIỮA đề và "Lời giải", đúng theo mẫu chuẩn.
+    const answerText = shortAnswerByNumber?.get(occ.number)
+    if (answerText) {
+      finalParagraphs.push(buildLabelParagraph(`Đáp án: ${answerText}`))
+    }
+
     const finalSolution = solution.length > 0 ? solution : detachedSolutionByNumber.get(occ.number) || []
     if (finalSolution.length > 0) {
       // Nhãn "Lời giải" bị bỏ đi lúc tách (chỉ dùng để NHẬN DIỆN ranh giới,

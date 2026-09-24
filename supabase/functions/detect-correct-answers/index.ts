@@ -17,23 +17,27 @@ const CORS_HEADERS = {
 interface IncomingBlock {
   key: string
   questionText: string // nội dung câu hỏi (không gồm các dòng phương án)
-  optionLines: string[] // các dòng phương án, ĐÚNG THỨ TỰ, kèm chữ cái ở đầu
+  optionLines: string[] // các dòng phương án, ĐÚNG THỨ TỰ, kèm chữ cái ở đầu — RỖNG nếu là câu trả lời ngắn
   solutionText: string // toàn bộ lời giải/giải thích đi kèm — rỗng nếu không có
 }
 
 interface ResultItem {
   key: string
-  correctIndices: number[] // chỉ số (0-based) trong optionLines cần gạch chân
+  correctIndices: number[] // chỉ số (0-based) trong optionLines cần gạch chân — rỗng nếu là câu trả lời ngắn
+  answerText: string | null // đáp số cuối cùng — CHỈ dùng khi optionLines rỗng (câu trả lời ngắn)
 }
 
 const BATCH_SIZE = 10
 
 async function detectBatch(batch: IncomingBlock[], apiKey: string): Promise<ResultItem[]> {
-  const withSolution = batch.filter((b) => b.solutionText.trim().length > 0 && b.optionLines.length > 0)
-  if (withSolution.length === 0) return batch.map((b) => ({ key: b.key, correctIndices: [] }))
+  const withSolution = batch.filter((b) => b.solutionText.trim().length > 0)
+  if (withSolution.length === 0) return batch.map((b) => ({ key: b.key, correctIndices: [], answerText: null }))
 
   const block = withSolution
     .map((b, i) => {
+      if (b.optionLines.length === 0) {
+        return `[${i}] (dạng: trả lời ngắn — không có phương án, cần rút ra đáp số cuối cùng)\nCâu hỏi: ${b.questionText}\nLời giải:\n${b.solutionText}`
+      }
       const isUpper = /^[A-D][.)]/.test(b.optionLines[0] || '')
       const kind = isUpper ? 'trắc nghiệm — CHỈ 1 đáp án đúng' : 'Đúng/Sai — MỖI ý tự đúng hoặc sai riêng'
       return `[${i}] (dạng: ${kind})\nCâu hỏi: ${b.questionText}\nCác phương án:\n${b.optionLines
@@ -42,15 +46,15 @@ async function detectBatch(batch: IncomingBlock[], apiKey: string): Promise<Resu
     })
     .join('\n\n')
 
-  const systemPrompt = `Bạn đọc lời giải của các câu hỏi Toán để xác định đáp án đúng, phục vụ việc tự động gạch chân đáp án trong đề.
+  const systemPrompt = `Bạn đọc lời giải của các câu hỏi Toán để xác định đáp án đúng, phục vụ việc tự động gạch chân đáp án / điền đáp số trong đề.
 
-Với câu TRẮC NGHIỆM (options chữ hoa A/B/C/D): xác định đúng 1 chỉ số phương án khớp với kết luận trong lời giải (thường có câu "Chọn X" hoặc "Vậy ... = X").
-Với câu ĐÚNG/SAI (options chữ thường a/b/c/d): xét TỪNG ý một, dựa vào lời giải xem ý đó đúng hay sai — trả về chỉ số của TẤT CẢ các ý ĐÚNG (không trả ý sai).
-Nếu lời giải không đủ rõ để kết luận chắc chắn, trả về mảng rỗng cho câu đó — KHÔNG đoán bừa.
+Với câu TRẮC NGHIỆM (options chữ hoa A/B/C/D): xác định đúng 1 chỉ số phương án khớp với kết luận trong lời giải (thường có câu "Chọn X" hoặc "Vậy ... = X"). Trả vào "correct", để "answer" là null.
+Với câu ĐÚNG/SAI (options chữ thường a/b/c/d): xét TỪNG ý một, dựa vào lời giải xem ý đó đúng hay sai — trả về chỉ số của TẤT CẢ các ý ĐÚNG vào "correct" (không trả ý sai), để "answer" là null.
+Với câu TRẢ LỜI NGẮN (không có phương án): đọc lời giải, rút ra ĐÚNG đáp số cuối cùng (một số/biểu thức ngắn gọn, đúng như cách người ra đề sẽ ghi, ví dụ "7", "300", "-2") vào "answer", để "correct" là mảng rỗng.
+Nếu lời giải không đủ rõ để kết luận chắc chắn, trả "correct" rỗng và "answer" là null cho câu đó — KHÔNG đoán bừa.
 
 Trả về đúng 1 mảng JSON, không giải thích thêm, không markdown, đúng định dạng:
-[{"i":0,"correct":[2]}, {"i":1,"correct":[0,2,3]}, ...]
-("correct" là mảng các chỉ số 0-based trong danh sách phương án của câu đó.)`
+[{"i":0,"correct":[2],"answer":null}, {"i":1,"correct":[],"answer":"300"}, ...]`
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -74,19 +78,23 @@ Trả về đúng 1 mảng JSON, không giải thích thêm, không markdown, đ
     .join('')
   const cleaned = rawText.replace(/```json|```/g, '').trim()
 
-  let parsed: Array<{ i: number; correct: number[] }>
+  let parsed: Array<{ i: number; correct: number[]; answer: string | null }>
   try {
     parsed = JSON.parse(cleaned)
   } catch {
-    return batch.map((b) => ({ key: b.key, correctIndices: [] }))
+    return batch.map((b) => ({ key: b.key, correctIndices: [], answerText: null }))
   }
 
   const withSolutionResults = withSolution.map((b, i) => {
     const item = parsed.find((p) => p.i === i)
-    return { key: b.key, correctIndices: Array.isArray(item?.correct) ? item!.correct : [] }
+    return {
+      key: b.key,
+      correctIndices: Array.isArray(item?.correct) ? item!.correct : [],
+      answerText: typeof item?.answer === 'string' && item.answer.trim() ? item.answer.trim() : null,
+    }
   })
   const byKey = new Map(withSolutionResults.map((r) => [r.key, r]))
-  return batch.map((b) => byKey.get(b.key) || { key: b.key, correctIndices: [] })
+  return batch.map((b) => byKey.get(b.key) || { key: b.key, correctIndices: [], answerText: null })
 }
 
 Deno.serve(async (req: Request) => {

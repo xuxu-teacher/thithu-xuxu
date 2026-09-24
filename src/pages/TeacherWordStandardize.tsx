@@ -9,6 +9,7 @@ import {
   repackDocxWithParagraphs,
   applyUnderlineToParagraphs,
   spliceAttachSolutions,
+  splitOptionsIntoOwnParagraphs,
   downloadBlob,
   RawParagraph,
 } from '../utils/docxSplice'
@@ -54,6 +55,7 @@ export default function TeacherWordStandardize() {
       {file && (
         <>
           <PdfBlankTool file={file} fileName={fileName} onError={setError} />
+          <NewlineOptionsTool file={file} fileName={fileName} onError={setError} />
           <UnderlineWordTool file={file} fileName={fileName} onError={setError} />
           <AttachSolutionWordTool file={file} fileName={fileName} onError={setError} />
         </>
@@ -182,6 +184,51 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
 }
 
 // ============================================================
+// KHỐI — Xuống dòng phương án — tải về file Word
+// ============================================================
+function NewlineOptionsTool({ file, fileName, onError }: { file: File; fileName: string; onError: (e: string | null) => void }) {
+  const [working, setWorking] = useState(false)
+  const [doneNote, setDoneNote] = useState<string | null>(null)
+
+  async function handleRun() {
+    setWorking(true)
+    onError(null)
+    setDoneNote(null)
+    try {
+      const raw = await loadRawDocx(file)
+      const split = splitOptionsIntoOwnParagraphs(raw.paragraphs)
+      const addedCount = split.length - raw.paragraphs.length
+      const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, split.map((p) => p.xml))
+      downloadBlob(blob, `${fileName || 'de'}-xuong-dong-phuong-an.docx`)
+      setDoneNote(
+        addedCount > 0
+          ? `✅ Đã tách phương án xuống dòng riêng (thêm ${addedCount} dòng) và tải file Word về.`
+          : '✅ File không có phương án nào bị dính chung dòng — tải file về giữ nguyên.',
+      )
+    } catch (err: any) {
+      onError(err.message || 'Có lỗi khi xử lý.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ border: '1px solid #c7d2fe' }}>
+      <h3>↵ Xuống dòng phương án — tải về file Word</h3>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        Áp dụng cho cả trắc nghiệm 4 lựa chọn (A/B/C/D) và Đúng/Sai (a/b/c/d) — nếu các phương án đang dính
+        chung 1 dòng với câu hỏi hoặc với nhau, tự động tách mỗi phương án xuống 1 dòng riêng, giữ nguyên định
+        dạng gốc của từng phần chữ.
+      </p>
+      <button className="btn" onClick={handleRun} disabled={working}>
+        {working ? '⏳ Đang xử lý...' : '↵ Xuống dòng & Tải Word'}
+      </button>
+      {doneNote && <p style={{ fontSize: 12.5, marginTop: 8 }}>{doneNote}</p>}
+    </div>
+  )
+}
+
+// ============================================================
 // KHỐI 2 — Gạch chân đáp án theo file mẫu — tải về file Word
 // ============================================================
 function UnderlineWordTool({ file, fileName, onError }: { file: File; fileName: string; onError: (e: string | null) => void }) {
@@ -194,15 +241,15 @@ function UnderlineWordTool({ file, fileName, onError }: { file: File; fileName: 
     setDoneNote(null)
     try {
       const raw = await loadRawDocx(file)
-      const targets = await autoDetectCorrectRawParagraphs(raw.paragraphs)
-      if (targets.length === 0) {
+      const { underlineTargets } = await autoDetectCorrectRawParagraphs(raw.paragraphs)
+      if (underlineTargets.length === 0) {
         setDoneNote('⚠ Không tìm được lời giải rõ ràng cho câu nào trong file để xác định đáp án — chưa gạch chân được câu nào.')
         return
       }
-      const newParagraphs = applyUnderlineToParagraphs(raw.paragraphs, targets)
+      const newParagraphs = applyUnderlineToParagraphs(raw.paragraphs, underlineTargets)
       const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, newParagraphs.map((p) => p.xml))
       downloadBlob(blob, `${fileName || 'de'}-gach-chan-dap-an.docx`)
-      setDoneNote(`✅ Đã gạch chân ${targets.length} đáp án và tải file Word về.`)
+      setDoneNote(`✅ Đã gạch chân ${underlineTargets.length} đáp án và tải file Word về.`)
     } catch (err: any) {
       onError(err.message || 'Có lỗi khi xử lý.')
     } finally {
@@ -239,15 +286,18 @@ function AttachSolutionWordTool({ file, fileName, onError }: { file: File; fileN
     try {
       const raw = await loadRawDocx(file)
 
-      // Gạch chân TRƯỚC khi ghép — lúc này options vẫn còn nguyên vị trí gần
-      // câu hỏi gốc, tránh phải dò lại sau khi thứ tự đoạn văn đã bị xáo trộn.
-      const targets = await autoDetectCorrectRawParagraphs(raw.paragraphs)
-      const underlined: RawParagraph[] = applyUnderlineToParagraphs(raw.paragraphs, targets)
+      // Xác định trước khi ghép — lúc này options/lời giải vẫn còn nguyên vị
+      // trí gần câu hỏi gốc, tránh phải dò lại sau khi đã xáo trộn thứ tự.
+      const { underlineTargets, shortAnswers } = await autoDetectCorrectRawParagraphs(raw.paragraphs)
+      const underlined: RawParagraph[] = applyUnderlineToParagraphs(raw.paragraphs, underlineTargets)
 
-      const merged = spliceAttachSolutions(underlined)
+      const shortAnswerMap = new Map(shortAnswers.map((s) => [s.number, s.answerText]))
+      const merged = spliceAttachSolutions(underlined, shortAnswerMap)
       const blob = await repackDocxWithParagraphs(raw.zip, raw.documentXml, merged.map((p) => p.xml))
       downloadBlob(blob, `${fileName || 'de'}-co-loi-giai-gach-chan.docx`)
-      setDoneNote(`✅ Đã ghép lời giải + gạch chân ${targets.length} đáp án, tải file Word về.`)
+      setDoneNote(
+        `✅ Đã ghép lời giải + gạch chân ${underlineTargets.length} đáp án + thêm ${shortAnswers.length} dòng "Đáp án:" cho câu trả lời ngắn, tải file Word về.`,
+      )
     } catch (err: any) {
       onError(err.message || 'Có lỗi khi xử lý.')
     } finally {
