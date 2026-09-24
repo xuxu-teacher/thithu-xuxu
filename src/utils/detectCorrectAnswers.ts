@@ -16,7 +16,11 @@ export function detectChonAnswer(solutionText: string): string | null {
 // xác 100%, không tốn phí AI) thay vì để AI tự đọc lời giải suy luận lại,
 // vì AI có thể tính sai hoặc đọc thiếu số liệu (đặc biệt khi số liệu được
 // gõ bằng công thức MathType).
-const EXPLICIT_ANSWER_RE = /(?:Đáp\s*án|Đáp\s*số)\s*:?\s*([^\n]+)/i
+// CHỈ bắt tối đa ~40 ký tự sau dấu ":" (thay vì bắt hết đến hết dòng) — một
+// đáp số/đáp án thật sự luôn ngắn gọn; nếu bắt dài hơn thế gần như chắc
+// chắn đã lỡ nuốt luôn cả câu văn phía sau do các đoạn lời giải bị nối
+// liền nhau mà không có ranh giới rõ ràng.
+const EXPLICIT_ANSWER_RE = /(?:Đáp\s*án|Đáp\s*số)\s*:?\s*([^\n.;]{1,40})/i
 
 export function extractExplicitAnswer(solutionText: string): string | null {
   const m = solutionText.match(EXPLICIT_ANSWER_RE)
@@ -65,7 +69,10 @@ export async function autoDetectCorrectRawParagraphs(paragraphs: RawParagraph[])
 
   for (const [number, { question, solution }] of qmap) {
     const optionRefs = splitOptionParagraphs(question)
-    const solutionText = solution.map((p) => p.plainText).join(' ')
+    // Nối bằng xuống dòng thật (không phải dấu cách) để giữ đúng ranh giới
+    // từng đoạn văn gốc — cần thiết để không bắt nhầm "Đáp số: ..." lấn
+    // sang cả câu văn của đoạn tiếp theo (xem EXPLICIT_ANSWER_RE ở trên).
+    const solutionText = solution.map((p) => p.plainText).join('\n')
     const key = String(number)
 
     if (optionRefs.length === 0) {

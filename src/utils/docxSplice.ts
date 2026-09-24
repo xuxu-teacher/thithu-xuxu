@@ -355,7 +355,13 @@ export function splitOptionsIntoOwnParagraphs(paragraphs: RawParagraph[]): RawPa
     const pOpenTag = p.xml.match(/^<w:p\b[^>]*>/)?.[0] || '<w:p>'
 
     markerIdx.forEach((mk, i) => {
-      const startRun = mk.runIdx
+      // Đoạn đầu tiên gộp luôn mọi run ĐỨNG TRƯỚC mốc đầu tiên tìm được
+      // (kể cả khi mốc thật sự — VD "A." — bị tách vụn thành nhiều run nhỏ
+      // không nhận diện được và mốc PHÁT HIỆN ĐƯỢC ĐẦU TIÊN lại là "B.") —
+      // tránh làm mất hẳn nội dung phương án đầu (đã từng xảy ra: phương án
+      // A biến mất hoàn toàn khỏi kết quả). Trường hợp xấu nhất chỉ là ghép
+      // nhầm vào chung đoạn với phương án kế tiếp, KHÔNG BAO GIỜ làm mất chữ.
+      const startRun = i === 0 ? 0 : mk.runIdx
       const endRun = i + 1 < markerIdx.length ? markerIdx[i + 1].runIdx : runs.length
       const runsXml = runs.slice(startRun, endRun).map((r) => r.xml).join('')
       const newXml = `${pOpenTag}${pPr}${runsXml}</w:p>`
