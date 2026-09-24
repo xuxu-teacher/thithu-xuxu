@@ -234,6 +234,20 @@ async function convertOleToLatex(
   return map
 }
 
+/**
+ * Trả về sẵn bản đồ (rId công thức OLE -> LaTeX đã chuyển đổi) cho 1 file
+ * đã mở sẵn dưới dạng JSZip — dùng lại được ở NHIỀU nơi khác ngoài
+ * parseWordExam (VD: docxSplice.ts cho các công cụ "Chuẩn hóa Word"), để
+ * không phải viết lại logic gọi máy chủ MathType nhiều lần. Nếu không có
+ * công thức OLE nào hoặc chưa cấu hình máy chủ, trả về Map rỗng ngay,
+ * không tốn thời gian gọi mạng.
+ */
+export async function getOleLatexMap(zip: JSZip): Promise<Map<string, string>> {
+  const oleItems = await extractOleItems(zip)
+  if (oleItems.length === 0 || !MATHTYPE_SERVER_URL) return new Map()
+  return convertOleToLatex(oleItems, MATHTYPE_SERVER_URL)
+}
+
 // ============================================================
 // TRÍCH XUẤT ĐOẠN VĂN (PARAGRAPH) TỪ XML THÔ — GIỮ THÔNG TIN GẠCH CHÂN
 // ============================================================

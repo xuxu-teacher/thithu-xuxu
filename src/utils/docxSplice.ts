@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { getOleLatexMap } from './docxParser'
 
 // ============================================================
 // GHÉP/SỬA FILE WORD MÀ GIỮ NGUYÊN ĐỊNH DẠNG GỐC
@@ -16,11 +17,32 @@ export interface RawParagraph {
   plainText: string // chữ thô (chỉ để nhận diện Câu N / Lời giải, không dùng để hiển thị)
 }
 
-function extractPlainText(pXml: string): string {
-  const wtRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g
+/** Đoạn văn CÓ NỘI DUNG THỊ GIÁC (ảnh/hình vẽ) dù không có chữ nào — không được coi là "dòng trống" rồi bỏ qua, nếu không sẽ mất hẳn ảnh khỏi kết quả. */
+function hasVisualContent(pXml: string): boolean {
+  return /<w:drawing\b|<w:pict\b|<v:shape\b|<v:imagedata\b/.test(pXml)
+}
+
+/**
+ * Lấy chữ thô của 1 đoạn văn — CÓ chèn luôn giá trị công thức MathType
+ * (đối tượng OLE) đã được chuyển đổi sẵn (nếu có), đúng vị trí xuất hiện
+ * trong đoạn. Nếu bỏ qua bước này, mọi số liệu/công thức gõ bằng MathType
+ * (rất phổ biến trong các file sưu tầm) sẽ hiện RỖNG khi đọc chữ thô —
+ * khiến việc nhận diện "Đáp án: ..." hay gửi cho AI đọc lời giải bị thiếu
+ * đúng giá trị thật, dễ suy luận sai (VD "Đáp án:" không thấy số gì, AI
+ * phải tự đoán một số khác không đúng với số liệu file gốc).
+ */
+function extractPlainText(pXml: string, oleLatexMap?: Map<string, string>): string {
+  const tokenRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<o:OLEObject\b[^>]*\br:id="(rId\d+)"/g
   let text = ''
   let m: RegExpExecArray | null
-  while ((m = wtRe.exec(pXml))) text += m[1]
+  while ((m = tokenRe.exec(pXml))) {
+    if (m[1] !== undefined) {
+      text += m[1]
+    } else if (m[2] && oleLatexMap) {
+      const latex = oleLatexMap.get(m[2])
+      if (latex) text += ` ${latex} `
+    }
+  }
   return text
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -46,11 +68,17 @@ export async function loadRawDocx(
   const documentXml = await zip.file('word/document.xml')?.async('string')
   if (!documentXml) throw new Error('Không tìm thấy document.xml — file Word có thể bị hỏng.')
 
+  // Đọc sẵn bản đồ công thức MathType (OLE) đã chuyển đổi — dùng chung 1
+  // lần cho toàn bộ file, để mọi đoạn văn đọc chữ thô đều thấy đúng giá
+  // trị công thức thay vì rỗng. Nếu file không có OLE nào hoặc chưa cấu
+  // hình máy chủ, hàm này trả về ngay Map rỗng, không tốn thời gian.
+  const oleLatexMap = await getOleLatexMap(zip)
+
   const matches = documentXml.match(BLOCK_RE) || []
   const paragraphs: RawParagraph[] = matches.map((xml) =>
     xml.startsWith('<w:tbl>')
       ? { xml, plainText: '[BẢNG SỐ LIỆU]' } // giữ nguyên khối, không phân tích chữ bên trong — tránh khớp nhầm "Câu"/"Lời giải"/phương án nằm tình cờ trong ô bảng
-      : { xml, plainText: extractPlainText(xml) },
+      : { xml, plainText: extractPlainText(xml, oleLatexMap) },
   )
   return { zip, documentXml, paragraphs }
 }
@@ -219,16 +247,18 @@ export function groupRawByQuestionMarker(paragraphs: RawParagraph[]): RawOccurre
 
   for (const p of paragraphs) {
     const text = p.plainText.trim()
-    if (!text || SKIP_HEADING_RE.test(text)) continue
+    const hasVisual = hasVisualContent(p.xml)
+    if (!text && !hasVisual) continue // dòng thật sự trống (không chữ, không ảnh) -> bỏ qua
+    if (text && SKIP_HEADING_RE.test(text)) continue
 
-    if (PART_HEADING_RE.test(text)) {
+    if (text && PART_HEADING_RE.test(text)) {
       partIndex++
       current = null
       occurrences.push({ number: null, paragraphs: [p] }) // giữ lại dòng tiêu đề PHẦN, không gán số câu
       continue
     }
 
-    const m = text.match(QUESTION_NUM_RE)
+    const m = text ? text.match(QUESTION_NUM_RE) : null
     if (m) {
       const effectiveNumber = partIndex * 1000 + parseInt(m[1], 10)
       current = { number: effectiveNumber, paragraphs: [p] }
@@ -265,13 +295,14 @@ export function splitRawSolution(paragraphs: RawParagraph[]): { question: RawPar
   let inSol = false
   for (const p of paragraphs) {
     const text = p.plainText.trim()
-    if (!text) continue
-    if (!inSol && SOLUTION_RE.test(text)) {
+    const hasVisual = hasVisualContent(p.xml)
+    if (!text && !hasVisual) continue // dòng thật sự trống -> bỏ qua (KHÔNG bỏ qua đoạn chỉ có ảnh)
+    if (text && !inSol && SOLUTION_RE.test(text)) {
       inSol = true
       continue
     }
     if (inSol) {
-      if (JUNK_LINE_RE.test(text)) continue
+      if (text && JUNK_LINE_RE.test(text)) continue
       solution.push(p)
     } else {
       question.push(p)
