@@ -188,15 +188,24 @@ export function buildLabelParagraph(text: string): RawParagraph {
 }
 
 const QUESTION_NUM_RE = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)/i
-// Cho phép có dấu # hoặc ký tự trang trí đứng trước (VD "#Lời giải" gặp ở
-// một số file sưu tầm từ nhóm chia sẻ đề).
-const SOLUTION_RE =
-  /^\s*[#*~]*\s*(Lời giải|LỜI GIẢI|Hướng dẫn giải|HƯỚNG DẪN GIẢI|Giải\s*:|Đáp án\s*:|Lời giải chi tiết|Trả lời)\s*:?\s*$/i
+// KHÔNG bắt buộc khớp trọn cả dòng nữa — một số file có chữ thừa/gõ dính
+// trước mốc (VD "Xong ph#Lời giải" — lỗi gõ dính có sẵn trong file gốc,
+// thường do bị định dạng ẩn chữ che khuất khi soạn) — chỉ cần dòng CÓ
+// CHỨA đúng cụm từ mốc, không quan tâm có gì đứng trước nó.
+const SOLUTION_RE = /[#*~]*\s*(Lời giải chi tiết|Lời giải|LỜI GIẢI|Hướng dẫn giải|HƯỚNG DẪN GIẢI|Giải\s*:|Đáp án\s*:|Trả lời)\s*:?\s*$/i
 const SKIP_HEADING_RE = /^\s*(ĐÁP ÁN|Đáp án|BẢNG ĐÁP ÁN)\s*$/i
 // Các dòng "rác" hay gặp trong lời giải sưu tầm từ nhóm chia sẻ đề (ghi
 // công tác giả/phản biện...) — không phải nội dung hướng dẫn giải thật,
 // tự động loại bỏ khi ghép lời giải.
 const JUNK_LINE_RE = /^\s*(FB\s*(tác giả|phản biện)|Facebook\s*(tác giả|phản biện)|Người\s*(ra đề|phản biện))\s*:/i
+
+// Đề thi thường chia nhiều "PHẦN" (PHẦN I, PHẦN II, PHẦN III...), MỖI PHẦN
+// tự đánh số lại từ "Câu 1" — nếu chỉ dùng đúng số câu làm khóa nhận diện,
+// "Câu 1" của PHẦN II sẽ bị hiểu nhầm là TRÙNG với "Câu 1" của PHẦN I và
+// bị bỏ qua toàn bộ (mất trắng cả phần sau). Vì vậy khóa nhận diện thật sự
+// dùng bên dưới là (số thứ tự PHẦN × 1000 + số câu) — vẫn là 1 số nguyên
+// bình thường nên không cần đổi bất kỳ chỗ nào khác đang dùng "number".
+const PART_HEADING_RE = /^\s*PHẦN\s+[IVXLCDM\d]+[.\s)]/i
 
 export interface RawOccurrence {
   number: number | null
@@ -206,14 +215,23 @@ export interface RawOccurrence {
 export function groupRawByQuestionMarker(paragraphs: RawParagraph[]): RawOccurrence[] {
   const occurrences: RawOccurrence[] = []
   let current: RawOccurrence | null = null
+  let partIndex = 0
 
   for (const p of paragraphs) {
     const text = p.plainText.trim()
     if (!text || SKIP_HEADING_RE.test(text)) continue
 
+    if (PART_HEADING_RE.test(text)) {
+      partIndex++
+      current = null
+      occurrences.push({ number: null, paragraphs: [p] }) // giữ lại dòng tiêu đề PHẦN, không gán số câu
+      continue
+    }
+
     const m = text.match(QUESTION_NUM_RE)
     if (m) {
-      current = { number: parseInt(m[1], 10), paragraphs: [p] }
+      const effectiveNumber = partIndex * 1000 + parseInt(m[1], 10)
+      current = { number: effectiveNumber, paragraphs: [p] }
       occurrences.push(current)
       continue
     }
