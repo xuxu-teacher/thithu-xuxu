@@ -126,9 +126,13 @@ function splitMarkerRun(runXml: string, markerLen: number): { markerXml: string;
   const markerText = text.slice(0, markerLen)
   const restText = text.slice(markerLen)
 
+  // attrs có thể đã sẵn xml:space="preserve" từ file gốc — không thêm lặp lại,
+  // chỉ thêm khi thật sự chưa có (thêm 2 lần cùng thuộc tính làm Word coi XML
+  // là hỏng, không mở được file).
+  const attrsWithSpace = attrs.includes('xml:space') ? attrs : `${attrs} xml:space="preserve"`
   const markerRPr = rPr ? rPr.replace('<w:rPr>', '<w:rPr><w:u w:val="single"/>') : '<w:rPr><w:u w:val="single"/></w:rPr>'
-  const markerXml = `<w:r>${markerRPr}<w:t${attrs} xml:space="preserve">${markerText}</w:t></w:r>`
-  const restXml = restText.length > 0 ? `<w:r>${rPr}<w:t${attrs} xml:space="preserve">${restText}</w:t></w:r>` : ''
+  const markerXml = `<w:r>${markerRPr}<w:t${attrsWithSpace}>${markerText}</w:t></w:r>`
+  const restXml = restText.length > 0 ? `<w:r>${rPr}<w:t${attrsWithSpace}>${restText}</w:t></w:r>` : ''
   return { markerXml, restXml }
 }
 
