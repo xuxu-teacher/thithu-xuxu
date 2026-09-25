@@ -74,6 +74,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
   const [colorScheme, setColorScheme] = useState<ColorScheme>('black-on-white')
   const [processing, setProcessing] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [exportNote, setExportNote] = useState<string | null>(null)
   const printRef = useRef<HTMLDivElement>(null)
 
   async function handleProcess() {
@@ -92,34 +93,54 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
   async function handleDownloadPdf() {
     if (!printRef.current) return
     setExporting(true)
+    setExportNote(null)
     try {
       const node = printRef.current
-      const canvas = await html2canvas(node, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff',
-      })
+      const bg = colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff'
+      const scale = 2
+
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
       const pageWidthMm = pdf.internal.pageSize.getWidth()
       const pageHeightMm = pdf.internal.pageSize.getHeight()
-      const pxPerMm = canvas.width / pageWidthMm
-      const pageHeightPx = Math.floor(pageHeightMm * pxPerMm)
 
-      let renderedPx = 0
+      const cssWidth = node.scrollWidth || 794
+      const totalHeightCss = node.scrollHeight
+      const cssPxPerMm = cssWidth / pageWidthMm
+      const pageHeightCss = Math.floor(pageHeightMm * cssPxPerMm)
+
+      // Chụp TỪNG TRANG RIÊNG BIỆT thay vì gộp cả tài liệu vào 1 ảnh —
+      // tài liệu dài (nhiều dòng trống × nhiều câu) có thể cao tới hàng
+      // chục nghìn pixel nếu chụp gộp, VƯỢT giới hạn kích thước ảnh mà
+      // trình duyệt cho phép, khiến phần vượt giới hạn hiện ra màu đen
+      // thay vì đúng nội dung. Chụp riêng từng trang giữ mỗi ảnh ở kích
+      // thước bình thường, không bao giờ chạm giới hạn đó.
+      const MAX_PAGES = 300
+      let y = 0
       let pageIndex = 0
-      while (renderedPx < canvas.height) {
-        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
-        const sliceCanvas = document.createElement('canvas')
-        sliceCanvas.width = canvas.width
-        sliceCanvas.height = sliceHeightPx
-        const ctx = sliceCanvas.getContext('2d')!
-        ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
-        const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
+      while (y < totalHeightCss && pageIndex < MAX_PAGES) {
+        const sliceHeightCss = Math.min(pageHeightCss, totalHeightCss - y)
+        const pageCanvas = await html2canvas(node, {
+          scale,
+          useCORS: true,
+          backgroundColor: bg,
+          x: 0,
+          y,
+          width: cssWidth,
+          height: sliceHeightCss,
+        })
+
+        const imgData = pageCanvas.toDataURL('image/jpeg', 0.95)
         if (pageIndex > 0) pdf.addPage()
-        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
-        renderedPx += sliceHeightPx
+        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightCss / cssPxPerMm)
+
+        y += sliceHeightCss
         pageIndex++
       }
+
+      if (y < totalHeightCss) {
+        setExportNote(`⚠ Tài liệu quá dài, chỉ xuất được ${MAX_PAGES} trang đầu — giảm bớt số dòng trống hoặc chia nhỏ file nếu cần đủ toàn bộ.`)
+      }
+
       pdf.save(`${fileName || 'de'}-khoang-trong.pdf`)
     } catch (err: any) {
       onError('Có lỗi khi xuất PDF: ' + (err.message || err))
@@ -161,6 +182,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
           <button className="btn" onClick={handleDownloadPdf} disabled={exporting} style={{ marginTop: 12 }}>
             {exporting ? '⏳ Đang tạo PDF...' : '⬇ Tải PDF'}
           </button>
+          {exportNote && <p style={{ fontSize: 12.5, marginTop: 8, color: 'var(--danger)' }}>{exportNote}</p>}
 
           <div style={{ position: 'absolute', left: -9999, top: 0 }}>
             <div ref={printRef} style={{ width: '794px', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}>
