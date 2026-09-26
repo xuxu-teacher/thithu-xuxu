@@ -97,48 +97,47 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
     try {
       const node = printRef.current
       const bg = colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff'
-      const scale = 2
+
+      // Chụp GỘP 1 LẦN cho nhanh (thay vì chụp riêng từng trang, rất chậm
+      // với tài liệu dài) — nhưng TỰ ĐỘNG GIẢM ĐỘ PHÂN GIẢI khi tài liệu
+      // quá dài, để tổng chiều cao ảnh (số dòng trống × số câu) không bao
+      // giờ vượt giới hạn kích thước ảnh mà trình duyệt cho phép (vượt
+      // giới hạn này trước đây gây ra hiện tượng cả trang hiện màu đen).
+      const scrollHeightCss = node.scrollHeight
+      const desiredScale = 2
+      const MAX_SAFE_CANVAS_HEIGHT = 16000
+      const scale = Math.max(0.3, Math.min(desiredScale, MAX_SAFE_CANVAS_HEIGHT / scrollHeightCss))
+
+      const canvas = await html2canvas(node, {
+        scale,
+        useCORS: true,
+        backgroundColor: bg,
+      })
 
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
       const pageWidthMm = pdf.internal.pageSize.getWidth()
       const pageHeightMm = pdf.internal.pageSize.getHeight()
+      const pxPerMm = canvas.width / pageWidthMm
+      const pageHeightPx = Math.floor(pageHeightMm * pxPerMm)
 
-      const cssWidth = node.scrollWidth || 794
-      const totalHeightCss = node.scrollHeight
-      const cssPxPerMm = cssWidth / pageWidthMm
-      const pageHeightCss = Math.floor(pageHeightMm * cssPxPerMm)
-
-      // Chụp TỪNG TRANG RIÊNG BIỆT thay vì gộp cả tài liệu vào 1 ảnh —
-      // tài liệu dài (nhiều dòng trống × nhiều câu) có thể cao tới hàng
-      // chục nghìn pixel nếu chụp gộp, VƯỢT giới hạn kích thước ảnh mà
-      // trình duyệt cho phép, khiến phần vượt giới hạn hiện ra màu đen
-      // thay vì đúng nội dung. Chụp riêng từng trang giữ mỗi ảnh ở kích
-      // thước bình thường, không bao giờ chạm giới hạn đó.
-      const MAX_PAGES = 300
-      let y = 0
+      let renderedPx = 0
       let pageIndex = 0
-      while (y < totalHeightCss && pageIndex < MAX_PAGES) {
-        const sliceHeightCss = Math.min(pageHeightCss, totalHeightCss - y)
-        const pageCanvas = await html2canvas(node, {
-          scale,
-          useCORS: true,
-          backgroundColor: bg,
-          x: 0,
-          y,
-          width: cssWidth,
-          height: sliceHeightCss,
-        })
-
-        const imgData = pageCanvas.toDataURL('image/jpeg', 0.95)
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width = canvas.width
+        sliceCanvas.height = sliceHeightPx
+        const ctx = sliceCanvas.getContext('2d')!
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
+        const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
         if (pageIndex > 0) pdf.addPage()
-        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightCss / cssPxPerMm)
-
-        y += sliceHeightCss
+        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
+        renderedPx += sliceHeightPx
         pageIndex++
       }
 
-      if (y < totalHeightCss) {
-        setExportNote(`⚠ Tài liệu quá dài, chỉ xuất được ${MAX_PAGES} trang đầu — giảm bớt số dòng trống hoặc chia nhỏ file nếu cần đủ toàn bộ.`)
+      if (scale < desiredScale) {
+        setExportNote('ℹ Tài liệu khá dài nên đã tự giảm nhẹ độ nét để tạo nhanh hơn và tránh lỗi hiện màu đen — chữ vẫn đọc rõ bình thường.')
       }
 
       pdf.save(`${fileName || 'de'}-khoang-trong.pdf`)
