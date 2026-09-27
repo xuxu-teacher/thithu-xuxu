@@ -97,47 +97,60 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
     try {
       const node = printRef.current
       const bg = colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff'
-
-      // Chụp GỘP 1 LẦN cho nhanh (thay vì chụp riêng từng trang, rất chậm
-      // với tài liệu dài) — nhưng TỰ ĐỘNG GIẢM ĐỘ PHÂN GIẢI khi tài liệu
-      // quá dài, để tổng chiều cao ảnh (số dòng trống × số câu) không bao
-      // giờ vượt giới hạn kích thước ảnh mà trình duyệt cho phép (vượt
-      // giới hạn này trước đây gây ra hiện tượng cả trang hiện màu đen).
-      const scrollHeightCss = node.scrollHeight
-      const desiredScale = 2
-      const MAX_SAFE_CANVAS_HEIGHT = 16000
-      const scale = Math.max(0.3, Math.min(desiredScale, MAX_SAFE_CANVAS_HEIGHT / scrollHeightCss))
-
-      const canvas = await html2canvas(node, {
-        scale,
-        useCORS: true,
-        backgroundColor: bg,
-      })
+      const scale = 2 // luôn giữ độ nét cao — KHÔNG giảm theo độ dài tài liệu nữa (cách cũ làm mờ hẳn với file dài)
 
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
       const pageWidthMm = pdf.internal.pageSize.getWidth()
       const pageHeightMm = pdf.internal.pageSize.getHeight()
-      const pxPerMm = canvas.width / pageWidthMm
-      const pageHeightPx = Math.floor(pageHeightMm * pxPerMm)
 
-      let renderedPx = 0
+      const cssWidth = node.scrollWidth || 794
+      const totalHeightCss = node.scrollHeight
+      const cssPxPerMm = cssWidth / pageWidthMm
+      const pageHeightCss = Math.floor(pageHeightMm * cssPxPerMm) // chiều cao 1 trang A4 tính theo px CSS gốc (chưa nhân scale)
+
+      // GỘP NHIỀU TRANG vào mỗi lần chụp (thay vì chụp hết 1 lần — dễ vượt
+      // giới hạn kích thước ảnh với file dài, gây đen/mờ; hoặc chụp từng
+      // trang một — rất chậm). Mỗi lần chụp tối đa khoảng
+      // MAX_SAFE_CANVAS_HEIGHT pixel (đã tính cả độ phân giải scale=2),
+      // luôn nằm trong giới hạn an toàn của trình duyệt mà vẫn giữ đúng độ
+      // nét cao và nhanh hơn nhiều so với chụp từng trang.
+      const MAX_SAFE_CANVAS_HEIGHT = 14000
+      const pageHeightScaledPx = Math.floor(pageHeightCss * scale)
+      const pagesPerBatch = Math.max(1, Math.floor(MAX_SAFE_CANVAS_HEIGHT / pageHeightScaledPx))
+      const batchHeightCss = pagesPerBatch * pageHeightCss
+
+      let y = 0
       let pageIndex = 0
-      while (renderedPx < canvas.height) {
-        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
-        const sliceCanvas = document.createElement('canvas')
-        sliceCanvas.width = canvas.width
-        sliceCanvas.height = sliceHeightPx
-        const ctx = sliceCanvas.getContext('2d')!
-        ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
-        const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
-        if (pageIndex > 0) pdf.addPage()
-        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
-        renderedPx += sliceHeightPx
-        pageIndex++
-      }
+      while (y < totalHeightCss) {
+        const batchSliceHeightCss = Math.min(batchHeightCss, totalHeightCss - y)
+        const batchCanvas = await html2canvas(node, {
+          scale,
+          useCORS: true,
+          backgroundColor: bg,
+          x: 0,
+          y,
+          width: cssWidth,
+          height: batchSliceHeightCss,
+        })
 
-      if (scale < desiredScale) {
-        setExportNote('ℹ Tài liệu khá dài nên đã tự giảm nhẹ độ nét để tạo nhanh hơn và tránh lỗi hiện màu đen — chữ vẫn đọc rõ bình thường.')
+        // Cắt đúng batch vừa chụp thành từng trang A4 riêng để thêm vào PDF.
+        const pxPerMm = batchCanvas.width / pageWidthMm
+        let renderedInBatchPx = 0
+        while (renderedInBatchPx < batchCanvas.height) {
+          const sliceHeightPx = Math.min(pageHeightScaledPx, batchCanvas.height - renderedInBatchPx)
+          const sliceCanvas = document.createElement('canvas')
+          sliceCanvas.width = batchCanvas.width
+          sliceCanvas.height = sliceHeightPx
+          const ctx = sliceCanvas.getContext('2d')!
+          ctx.drawImage(batchCanvas, 0, renderedInBatchPx, batchCanvas.width, sliceHeightPx, 0, 0, batchCanvas.width, sliceHeightPx)
+          const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
+          if (pageIndex > 0) pdf.addPage()
+          pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
+          renderedInBatchPx += sliceHeightPx
+          pageIndex++
+        }
+
+        y += batchSliceHeightCss
       }
 
       pdf.save(`${fileName || 'de'}-khoang-trong.pdf`)
