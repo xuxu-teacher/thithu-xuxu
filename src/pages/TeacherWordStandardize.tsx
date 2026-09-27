@@ -97,7 +97,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
     try {
       const node = printRef.current
       const bg = colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff'
-      const scale = 2 // luôn giữ độ nét cao — KHÔNG giảm theo độ dài tài liệu nữa (cách cũ làm mờ hẳn với file dài)
+      const scale = 2 // luôn giữ độ nét cao
 
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
       const pageWidthMm = pdf.internal.pageSize.getWidth()
@@ -106,51 +106,85 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
       const cssWidth = node.scrollWidth || 794
       const totalHeightCss = node.scrollHeight
       const cssPxPerMm = cssWidth / pageWidthMm
-      const pageHeightCss = Math.floor(pageHeightMm * cssPxPerMm) // chiều cao 1 trang A4 tính theo px CSS gốc (chưa nhân scale)
+      const idealPageHeightCss = Math.floor(pageHeightMm * cssPxPerMm) // chiều cao 1 trang A4, px CSS gốc (chưa nhân scale)
 
-      // GỘP NHIỀU TRANG vào mỗi lần chụp (thay vì chụp hết 1 lần — dễ vượt
-      // giới hạn kích thước ảnh với file dài, gây đen/mờ; hoặc chụp từng
-      // trang một — rất chậm). Mỗi lần chụp tối đa khoảng
-      // MAX_SAFE_CANVAS_HEIGHT pixel (đã tính cả độ phân giải scale=2),
-      // luôn nằm trong giới hạn an toàn của trình duyệt mà vẫn giữ đúng độ
-      // nét cao và nhanh hơn nhiều so với chụp từng trang.
+      // KHÔNG cắt ngang qua ảnh/bảng biến thiên VÀ công thức toán (MathJax
+      // render ra thẻ <mjx-container>) — nếu ranh giới trang (theo chiều
+      // cao cố định) rơi vào GIỮA 1 trong 2 loại này, dịch ranh giới lên
+      // ngay trước nó — trang đó ngắn hơn bình thường 1 chút, nhưng ảnh và
+      // công thức luôn trọn vẹn, không bao giờ bị cắt đôi giữa 2 trang nữa.
+      const containerRect = node.getBoundingClientRect()
+      const imageRanges = Array.from(node.querySelectorAll('img, mjx-container')).map((el) => {
+        const r = el.getBoundingClientRect()
+        return { top: r.top - containerRect.top, bottom: r.bottom - containerRect.top }
+      })
+
+      const pageBreaks: number[] = []
+      {
+        let y = 0
+        while (y < totalHeightCss) {
+          let boundary = Math.min(y + idealPageHeightCss, totalHeightCss)
+          for (const r of imageRanges) {
+            if (boundary > r.top && boundary < r.bottom) {
+              boundary = Math.max(y + Math.floor(idealPageHeightCss * 0.15), r.top)
+              break
+            }
+          }
+          pageBreaks.push(boundary)
+          y = boundary
+        }
+      }
+
+      // GỘP NHIỀU TRANG vào mỗi lần chụp cho nhanh (thay vì chụp từng trang
+      // một, rất chậm) — mỗi lần chụp tối đa MAX_SAFE_CANVAS_HEIGHT pixel
+      // (đã nhân scale), không bao giờ vượt giới hạn kích thước ảnh an toàn
+      // của trình duyệt (vượt giới hạn này trước đây gây đen/mờ cả trang).
       const MAX_SAFE_CANVAS_HEIGHT = 14000
-      const pageHeightScaledPx = Math.floor(pageHeightCss * scale)
-      const pagesPerBatch = Math.max(1, Math.floor(MAX_SAFE_CANVAS_HEIGHT / pageHeightScaledPx))
-      const batchHeightCss = pagesPerBatch * pageHeightCss
-
-      let y = 0
+      let batchStart = 0
+      let breakIdx = 0
       let pageIndex = 0
-      while (y < totalHeightCss) {
-        const batchSliceHeightCss = Math.min(batchHeightCss, totalHeightCss - y)
+
+      while (breakIdx < pageBreaks.length) {
+        let batchEndIdx = breakIdx
+        while (
+          batchEndIdx < pageBreaks.length - 1 &&
+          (pageBreaks[batchEndIdx + 1] - batchStart) * scale <= MAX_SAFE_CANVAS_HEIGHT
+        ) {
+          batchEndIdx++
+        }
+        const batchEndY = pageBreaks[batchEndIdx]
+        const batchSliceHeightCss = batchEndY - batchStart
+
         const batchCanvas = await html2canvas(node, {
           scale,
           useCORS: true,
           backgroundColor: bg,
           x: 0,
-          y,
+          y: batchStart,
           width: cssWidth,
           height: batchSliceHeightCss,
         })
 
-        // Cắt đúng batch vừa chụp thành từng trang A4 riêng để thêm vào PDF.
         const pxPerMm = batchCanvas.width / pageWidthMm
-        let renderedInBatchPx = 0
-        while (renderedInBatchPx < batchCanvas.height) {
-          const sliceHeightPx = Math.min(pageHeightScaledPx, batchCanvas.height - renderedInBatchPx)
+        let prevBreak = batchStart
+        for (let i = breakIdx; i <= batchEndIdx; i++) {
+          const pageEndCss = pageBreaks[i]
+          const sliceTopPx = Math.round((prevBreak - batchStart) * scale)
+          const sliceHeightPx = Math.round((pageEndCss - prevBreak) * scale)
           const sliceCanvas = document.createElement('canvas')
           sliceCanvas.width = batchCanvas.width
           sliceCanvas.height = sliceHeightPx
           const ctx = sliceCanvas.getContext('2d')!
-          ctx.drawImage(batchCanvas, 0, renderedInBatchPx, batchCanvas.width, sliceHeightPx, 0, 0, batchCanvas.width, sliceHeightPx)
+          ctx.drawImage(batchCanvas, 0, sliceTopPx, batchCanvas.width, sliceHeightPx, 0, 0, batchCanvas.width, sliceHeightPx)
           const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
           if (pageIndex > 0) pdf.addPage()
           pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
-          renderedInBatchPx += sliceHeightPx
           pageIndex++
+          prevBreak = pageEndCss
         }
 
-        y += batchSliceHeightCss
+        batchStart = batchEndY
+        breakIdx = batchEndIdx + 1
       }
 
       pdf.save(`${fileName || 'de'}-khoang-trong.pdf`)
