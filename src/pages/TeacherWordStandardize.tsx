@@ -415,16 +415,16 @@ function AttachSolutionWordTool({ file, fileName, onError }: { file: File; fileN
 
 function renderQuestionOnly(b: QuestionBlock, color: string) {
   const elements: JSX.Element[] = []
-  let optionBuffer: string[] = []
+  let optionBuffer: { text: string; underline: boolean }[] = []
   let key = 0
 
   const flushOptions = () => {
     if (optionBuffer.length === 0) return
     elements.push(
       <div key={`opt-${key++}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', margin: '4px 0' }}>
-        {optionBuffer.map((line, i) => (
-          <div key={i} style={{ color }}>
-            <MathRenderer html={line} />
+        {optionBuffer.map((opt, i) => (
+          <div key={i} style={{ color, textDecoration: opt.underline ? 'underline' : 'none' }}>
+            <MathRenderer html={opt.text} />
           </div>
         ))}
       </div>,
@@ -432,18 +432,19 @@ function renderQuestionOnly(b: QuestionBlock, color: string) {
     optionBuffer = []
   }
 
-  for (const line of b.questionLines) {
+  b.questionLines.forEach((line, i) => {
+    const underline = b.underline[i]
     if (isOptionLine(line)) {
-      optionBuffer.push(line)
+      optionBuffer.push({ text: line, underline })
     } else {
       flushOptions()
       elements.push(
-        <p key={`ln-${key++}`} style={{ color, margin: '4px 0' }}>
+        <p key={`ln-${key++}`} style={{ color, margin: '4px 0', textDecoration: underline ? 'underline' : 'none' }}>
           <MathRenderer html={line} />
         </p>,
       )
     }
-  }
+  })
   flushOptions()
   return elements
 }

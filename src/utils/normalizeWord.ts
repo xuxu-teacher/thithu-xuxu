@@ -6,7 +6,16 @@
 // tách hẳn ở cuối file, đánh số lại từ đầu). Việc HIỂN THỊ/XUẤT có lời
 // giải hay không, và việc gạch chân đáp án, là 2 CÔNG CỤ ĐỘC LẬP tác
 // động lên cùng 1 dữ liệu gốc này — không phá vỡ lẫn nhau.
+//
+// Giữ nguyên thông tin GẠCH CHÂN của từng dòng xuyên suốt cả quá trình
+// tách/ghép — trước đây bị bỏ qua hoàn toàn (luôn mặc định false), khiến
+// đáp án đã gạch chân sẵn trong file gốc không hiển thị lại được.
 // ============================================================
+
+export interface InputParagraph {
+  text: string
+  hasUnderline?: boolean
+}
 
 const QUESTION_NUM_RE = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)/i
 const SOLUTION_RE =
@@ -31,9 +40,11 @@ export function isUppercaseOptionSet(lines: string[]): boolean {
 
 /**
  * Nếu 1 dòng chứa từ 2 mốc phương án (A./B./C./D. hoặc a/b/c/d) trở lên
- * dính liền nhau — tách mỗi phương án xuống 1 dòng riêng.
+ * dính liền nhau — tách mỗi phương án xuống 1 dòng riêng. Giữ nguyên
+ * trạng thái gạch chân của dòng gốc cho MỌI dòng con tách ra (không biết
+ * chính xác phần nào trong dòng gốc được gạch chân, nên áp dụng chung).
  */
-export function splitStuckOptions(text: string): string[] {
+export function splitStuckOptions(text: string, hasUnderline = false): { text: string; hasUnderline: boolean }[] {
   const marks: { letter: string; index: number }[] = []
   let m: RegExpExecArray | null
   OPTION_MARK_RE.lastIndex = 0
@@ -47,16 +58,16 @@ export function splitStuckOptions(text: string): string[] {
     marks.length >= 2 &&
     sameCase &&
     marks.every((x, i) => i === 0 || x.letter.charCodeAt(0) === marks[i - 1].letter.charCodeAt(0) + 1)
-  if (!isSequential) return [text]
+  if (!isSequential) return [{ text, hasUnderline }]
 
-  const parts: string[] = []
+  const parts: { text: string; hasUnderline: boolean }[] = []
   const head = text.slice(0, marks[0].index).trim()
-  if (head) parts.push(head)
+  if (head) parts.push({ text: head, hasUnderline })
   for (let i = 0; i < marks.length; i++) {
     const start = marks[i].index
     const end = i + 1 < marks.length ? marks[i + 1].index : text.length
     const seg = text.slice(start, end).trim()
-    if (seg) parts.push(seg)
+    if (seg) parts.push({ text: seg, hasUnderline })
   }
   return parts
 }
@@ -69,46 +80,55 @@ export interface QuestionBlock {
   underline: boolean[] // song song với questionLines — dòng nào bị gạch chân (đáp án đúng)
 }
 
-interface RawOccurrence {
-  number: number | null
-  lines: string[]
+interface RawLine {
+  text: string
+  hasUnderline: boolean
 }
 
-function splitByQuestionMarker(paragraphs: { text: string }[]): RawOccurrence[] {
+interface RawOccurrence {
+  number: number | null
+  lines: RawLine[]
+}
+
+function splitByQuestionMarker(paragraphs: InputParagraph[]): RawOccurrence[] {
   const occurrences: RawOccurrence[] = []
   let current: RawOccurrence | null = null
 
   for (const p of paragraphs) {
     const text = p.text.trim()
     if (!text || SKIP_HEADING_RE.test(text)) continue
+    const line: RawLine = { text, hasUnderline: !!p.hasUnderline }
 
     const m = text.match(QUESTION_NUM_RE)
     if (m) {
-      current = { number: parseInt(m[1], 10), lines: [text] }
+      current = { number: parseInt(m[1], 10), lines: [line] }
       occurrences.push(current)
       continue
     }
     if (current) {
-      current.lines.push(text)
+      current.lines.push(line)
     } else {
-      occurrences.push({ number: null, lines: [text] })
+      occurrences.push({ number: null, lines: [line] })
       current = null
     }
   }
   return occurrences
 }
 
-function splitSolution(lines: string[]): { question: string[]; solution: string[] } {
-  const question: string[] = []
-  const solution: string[] = []
+function splitSolution(lines: RawLine[]): { question: RawLine[]; solution: RawLine[] } {
+  const question: RawLine[] = []
+  const solution: RawLine[] = []
   let inSol = false
   for (const line of lines) {
-    if (!inSol && SOLUTION_RE.test(line)) {
+    if (!inSol && SOLUTION_RE.test(line.text)) {
       inSol = true
       continue
     }
-    if (inSol) solution.push(line)
-    else question.push(...splitStuckOptions(line))
+    if (inSol) {
+      solution.push(line)
+    } else {
+      for (const part of splitStuckOptions(line.text, line.hasUnderline)) question.push(part)
+    }
   }
   return { question, solution }
 }
@@ -116,9 +136,11 @@ function splitSolution(lines: string[]): { question: string[]; solution: string[
 /**
  * Đọc toàn bộ đoạn văn, tách thành các câu — mỗi câu giữ RIÊNG câu hỏi và
  * lời giải (nếu có, kể cả khi lời giải tách hẳn thành khu vực riêng ở
- * cuối file, đánh số lại theo đúng thứ tự câu).
+ * cuối file, đánh số lại theo đúng thứ tự câu). Giữ nguyên trạng thái
+ * gạch chân của từng dòng từ file gốc (VD đáp án đúng đã được giáo viên
+ * gạch chân sẵn trong Word).
  */
-export function parseIntoBlocks(paragraphs: { text: string }[]): QuestionBlock[] {
+export function parseIntoBlocks(paragraphs: InputParagraph[]): QuestionBlock[] {
   const occurrences = splitByQuestionMarker(paragraphs)
   const blocksByNumber = new Map<number, QuestionBlock>()
   const orderedBlocks: QuestionBlock[] = []
@@ -127,14 +149,15 @@ export function parseIntoBlocks(paragraphs: { text: string }[]): QuestionBlock[]
 
   for (const occ of occurrences) {
     const { question, solution } = splitSolution(occ.lines)
+    const solutionTexts = solution.map((l) => l.text)
 
     if (occ.number === null) {
       orderedBlocks.push({
         id: nextId(),
         number: null,
-        questionLines: question,
+        questionLines: question.map((l) => l.text),
         solutionLines: [],
-        underline: question.map(() => false),
+        underline: question.map((l) => l.hasUnderline),
       })
       continue
     }
@@ -143,17 +166,17 @@ export function parseIntoBlocks(paragraphs: { text: string }[]): QuestionBlock[]
 
     if (isSolutionOnly) {
       const target = blocksByNumber.get(occ.number)!
-      if (target.solutionLines.length === 0) target.solutionLines = solution
-      else target.solutionLines.push(...solution)
+      if (target.solutionLines.length === 0) target.solutionLines = solutionTexts
+      else target.solutionLines.push(...solutionTexts)
       continue
     }
 
     const block: QuestionBlock = {
       id: nextId(),
       number: occ.number,
-      questionLines: question,
-      solutionLines: solution,
-      underline: question.map(() => false),
+      questionLines: question.map((l) => l.text),
+      solutionLines: solutionTexts,
+      underline: question.map((l) => l.hasUnderline),
     }
     blocksByNumber.set(occ.number, block)
     orderedBlocks.push(block)
