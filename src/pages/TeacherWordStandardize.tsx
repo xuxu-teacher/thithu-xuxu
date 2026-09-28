@@ -19,10 +19,17 @@ import MathRenderer from '../components/MathRenderer'
 
 type ColorScheme = 'black-on-white' | 'white-on-green'
 
+// Nhãn phiên bản — hiện ngay dưới tiêu đề để biết chính xác bản nào đang chạy
+// trên web (nếu vẫn thấy nhãn cũ nghĩa là bản mới CHƯA được triển khai xong).
+const BUILD_TAG = '28-09-2026 · gạch-chân-đúng-chỗ + bảng + sửa-công-thức'
+
 export default function TeacherWordStandardize() {
   const [file, setFile] = useState<File | null>(null)
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Đổi file -> các khối công cụ phải làm lại từ đầu (trước đây khối PDF vẫn
+  // giữ kết quả đã xử lý của file CŨ nên tải về ra đúng nội dung cũ).
+  const toolKey = file ? `${file.name}-${file.size}-${file.lastModified}` : 'none'
 
   return (
     <div className="container">
@@ -32,6 +39,7 @@ export default function TeacherWordStandardize() {
 
       <div className="card">
         <h2>📄 Hỗ trợ Word</h2>
+        <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 6px' }}>Phiên bản công cụ: {BUILD_TAG}</p>
         <p style={{ fontSize: 13 }}>
           Tải lên 1 file Word có các câu đánh số "Câu 1", "Câu 2"... — dùng chung cho cả 3 công cụ độc lập
           bên dưới, chọn công cụ nào tùy nhu cầu.
@@ -55,10 +63,10 @@ export default function TeacherWordStandardize() {
 
       {file && (
         <>
-          <PdfBlankTool file={file} fileName={fileName} onError={setError} />
-          <NewlineOptionsTool file={file} fileName={fileName} onError={setError} />
-          <UnderlineWordTool file={file} fileName={fileName} onError={setError} />
-          <AttachSolutionWordTool file={file} fileName={fileName} onError={setError} />
+          <PdfBlankTool key={toolKey} file={file} fileName={fileName} onError={setError} />
+          <NewlineOptionsTool key={toolKey} file={file} fileName={fileName} onError={setError} />
+          <UnderlineWordTool key={toolKey} file={file} fileName={fileName} onError={setError} />
+          <AttachSolutionWordTool key={toolKey} file={file} fileName={fileName} onError={setError} />
         </>
       )}
     </div>
@@ -178,6 +186,12 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
           ctx.drawImage(batchCanvas, 0, sliceTopPx, batchCanvas.width, sliceHeightPx, 0, 0, batchCanvas.width, sliceHeightPx)
           const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
           if (pageIndex > 0) pdf.addPage()
+          // Tô kín nền cả trang trước khi chèn ảnh — trang bị "co ngắn" (để
+          // không cắt ngang ảnh/công thức) và trang cuối sẽ không còn dải trắng.
+          if (colorScheme === 'white-on-green') {
+            pdf.setFillColor(31, 92, 63)
+            pdf.rect(0, 0, pageWidthMm, pageHeightMm, 'F')
+          }
           pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
           pageIndex++
           prevBreak = pageEndCss
@@ -414,17 +428,19 @@ function AttachSolutionWordTool({ file, fileName, onError }: { file: File; fileN
 }
 
 function renderQuestionOnly(b: QuestionBlock, color: string) {
+  // Gạch chân hiển thị nhờ thẻ <u> nằm ngay trong nội dung dòng (đúng chỗ chữ
+  // được gạch chân trong Word) — KHÔNG gạch cả dòng theo cờ true/false nữa.
   const elements: JSX.Element[] = []
-  let optionBuffer: { text: string; underline: boolean }[] = []
+  let optionBuffer: string[] = []
   let key = 0
 
   const flushOptions = () => {
     if (optionBuffer.length === 0) return
     elements.push(
       <div key={`opt-${key++}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 16px', margin: '4px 0' }}>
-        {optionBuffer.map((opt, i) => (
-          <div key={i} style={{ color, textDecoration: opt.underline ? 'underline' : 'none' }}>
-            <MathRenderer html={opt.text} />
+        {optionBuffer.map((line, i) => (
+          <div key={i} style={{ color }}>
+            <MathRenderer html={line} />
           </div>
         ))}
       </div>,
@@ -432,19 +448,18 @@ function renderQuestionOnly(b: QuestionBlock, color: string) {
     optionBuffer = []
   }
 
-  b.questionLines.forEach((line, i) => {
-    const underline = b.underline[i]
+  for (const line of b.questionLines) {
     if (isOptionLine(line)) {
-      optionBuffer.push({ text: line, underline })
+      optionBuffer.push(line)
     } else {
       flushOptions()
       elements.push(
-        <p key={`ln-${key++}`} style={{ color, margin: '4px 0', textDecoration: underline ? 'underline' : 'none' }}>
+        <div key={`ln-${key++}`} style={{ color, margin: '4px 0' }}>
           <MathRenderer html={line} />
-        </p>,
+        </div>,
       )
     }
-  })
+  }
   flushOptions()
   return elements
 }

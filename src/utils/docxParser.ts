@@ -200,35 +200,78 @@ async function extractOleItems(zip: JSZip): Promise<Array<{ id: string; ole_b64:
 // tạp hơn, ví dụ có ký hiệu vectơ) bị rớt mất mà không báo lỗi rõ ràng.
 const OLE_BATCH_SIZE = 40
 
+async function postOleBatch(
+  batch: Array<{ id: string; ole_b64: string }>,
+  serverUrl: string
+): Promise<Map<string, string>> {
+  const res = await fetch(`${serverUrl}/v1/convert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: batch, wrap: true }),
+  })
+  if (!res.ok) throw new Error(`Máy chủ MathType trả về lỗi ${res.status}`)
+  const data = await res.json()
+  const out = new Map<string, string>()
+  for (const r of data.results || []) {
+    if (r.id && r.latex && !r.error) out.set(r.id, r.latex.trim())
+  }
+  return out
+}
+
+async function postOleBatchWithRetry(
+  batch: Array<{ id: string; ole_b64: string }>,
+  serverUrl: string,
+  attempts: number
+): Promise<Map<string, string>> {
+  let lastErr: unknown
+  for (let a = 1; a <= attempts; a++) {
+    try {
+      return await postOleBatch(batch, serverUrl)
+    } catch (e) {
+      lastErr = e
+      if (a < attempts) await new Promise((r) => setTimeout(r, 1500 * a))
+    }
+  }
+  throw lastErr
+}
+
+/**
+ * Chuyển công thức OLE -> LaTeX theo từng đợt nhỏ. Đợt nào lỗi (máy chủ
+ * "ngủ đông", quá tải, timeout...) được THỬ LẠI vài lần rồi chia nhỏ hơn nữa
+ * — trước đây 1 đợt lỗi là mất trắng toàn bộ công thức của đợt đó (hiện ra
+ * chỗ trống trong đề), giờ chỉ mất khi máy chủ thật sự không chuyển được.
+ */
 async function convertOleToLatex(
   items: Array<{ id: string; ole_b64: string }>,
   serverUrl: string
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   if (!items.length || !serverUrl) return map
+  const merge = (m: Map<string, string>) => m.forEach((v, k) => map.set(k, v))
 
-  const batches: Array<{ id: string; ole_b64: string }>[] = []
   for (let i = 0; i < items.length; i += OLE_BATCH_SIZE) {
-    batches.push(items.slice(i, i + OLE_BATCH_SIZE))
+    const batch = items.slice(i, i + OLE_BATCH_SIZE)
+    try {
+      merge(await postOleBatchWithRetry(batch, serverUrl, 3))
+    } catch (e) {
+      console.warn('[docxParser] 1 đợt chuyển đổi OLE lỗi sau nhiều lần thử, chia nhỏ để thử lại:', e)
+      for (let j = 0; j < batch.length; j += 5) {
+        try {
+          merge(await postOleBatchWithRetry(batch.slice(j, j + 5), serverUrl, 2))
+        } catch {
+          /* bỏ qua các công thức thật sự không chuyển được */
+        }
+      }
+    }
   }
 
-  for (const batch of batches) {
+  // Lượt bù: các công thức máy chủ trả về rỗng lần đầu -> thử lại 1 lần.
+  const missing = items.filter((it) => !map.has(it.id))
+  for (let i = 0; i < missing.length; i += 10) {
     try {
-      const res = await fetch(`${serverUrl}/v1/convert`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: batch, wrap: true }),
-      })
-      if (!res.ok) throw new Error(`Máy chủ MathType trả về lỗi ${res.status}`)
-      const data = await res.json()
-      for (const r of data.results || []) {
-        if (r.id && r.latex && !r.error) map.set(r.id, r.latex.trim())
-      }
-    } catch (e) {
-      // Một đợt lỗi không làm hỏng cả file — các đợt khác vẫn tiếp tục,
-      // công thức thuộc đợt lỗi sẽ được đánh dấu "cần rà lại" như bình
-      // thường (không có latex -> giữ trống, các bước sau đã xử lý việc này).
-      console.warn('[docxParser] 1 đợt chuyển đổi OLE thất bại, bỏ qua đợt này, tiếp tục các đợt còn lại:', e)
+      merge(await postOleBatchWithRetry(missing.slice(i, i + 10), serverUrl, 1))
+    } catch {
+      /* giữ nguyên trống */
     }
   }
   return map
@@ -251,7 +294,11 @@ export async function getOleLatexMap(zip: JSZip): Promise<Map<string, string>> {
 // ============================================================
 // TRÍCH XUẤT ĐOẠN VĂN (PARAGRAPH) TỪ XML THÔ — GIỮ THÔNG TIN GẠCH CHÂN
 // ============================================================
-function extractParagraphsRaw(documentXml: string, oleLatexMap: Map<string, string>): ParagraphData[] {
+function extractParagraphsRaw(
+  documentXml: string,
+  oleLatexMap: Map<string, string>,
+  markUnderline = false,
+): ParagraphData[] {
   const paragraphs: ParagraphData[] = []
   const paraRe = /<w:p\b[\s\S]*?<\/w:p>/g
   const runRe = /<w:r\b[\s\S]*?<\/w:r>/g
@@ -301,12 +348,20 @@ function extractParagraphsRaw(documentXml: string, oleLatexMap: Map<string, stri
         hasUnderline = true
         underlinedSegments.push(runText.trim())
       }
+      // Chế độ "giữ gạch chân": bọc đúng đoạn chữ được gạch chân trong thẻ <u>
+      // (VD chỉ chữ "A" của phương án đúng) để về sau tách dòng/hiển thị vẫn
+      // biết chính xác CHỖ NÀO được gạch chân, thay vì gạch cả đoạn.
+      if (markUnderline && isUnderlined && runText.trim()) {
+        const mm = runText.match(/^(\s*)([\s\S]*?)(\s*)$/)
+        if (mm) runText = `${mm[1]}<u>${mm[2]}</u>${mm[3]}`
+      }
       text += runText
     }
 
     text = normalizeVietnamese(text.trim())
     text = normalizeLatex(text)
     text = text.replace(/[ \t]*\n[ \t]*/g, '\n').trim()
+    if (markUnderline) text = text.replace(/<\/u>(\s*)<u>/g, '$1')
 
     if (text || imageRIds.length > 0) {
       paragraphs.push({ text, imageRIds, hasUnderline, underlinedSegments })
@@ -771,6 +826,36 @@ export interface ParseWordResult {
  * chuyển đổi), dùng cho các công cụ xử lý file Word khác ngoài luồng tạo
  * đề (VD: mục "Chuẩn hóa Word").
  */
+/**
+ * Sửa công thức LaTeX bị thiếu/thừa cặp \\left ... \\right (do máy chủ chuyển
+ * đổi MathType trả về chưa hoàn chỉnh) — nếu để nguyên, MathJax hiện dòng lỗi
+ * vàng "Missing \\left or extra \\right" thay cho cả công thức. Ở đây bỏ hẳn
+ * \\left/\\right (giữ lại dấu ngoặc) để công thức vẫn hiển thị được.
+ */
+function repairLeftRight(text: string): string {
+  return text.replace(/\$([^$]+)\$/g, (whole, inner: string) => {
+    const l = (inner.match(/\\left/g) || []).length
+    const r = (inner.match(/\\right/g) || []).length
+    if (l === r) return whole
+    const fixed = inner
+      .replace(/\\left\s*\./g, '')
+      .replace(/\\right\s*\./g, '')
+      .replace(/\\left/g, '')
+      .replace(/\\right/g, '')
+    return `$${fixed}$`
+  })
+}
+
+/**
+ * Đọc thô 1 file Word BẤT KỲ (không nhất thiết là đề thi đúng cấu trúc) —
+ * trả về danh sách đoạn văn giữ nguyên công thức toán (LaTeX/MathType đã
+ * chuyển đổi), dùng cho các công cụ xử lý file Word khác ngoài luồng tạo
+ * đề (VD: mục "Hỗ trợ Word").
+ *
+ *  - Bảng (<w:tbl>) được dựng lại thành bảng HTML thật (mỗi ô 1 ô) thay vì
+ *    bị dàn phẳng thành từng dòng chữ rời rạc như trước.
+ *  - Chữ được gạch chân trong file gốc được bọc <u>...</u> đúng chỗ.
+ */
 export async function parseGenericWordParagraphs(
   file: File,
 ): Promise<{ text: string; hasUnderline: boolean }[]> {
@@ -783,22 +868,45 @@ export async function parseGenericWordParagraphs(
     oleLatexMap = await convertOleToLatex(oleItems, MATHTYPE_SERVER_URL)
   }
 
-  // Trước bản sửa này, hàm chỉ trả về chữ (p.text), BỎ SÓT hẳn phần ảnh
-  // (p.imageRIds) dù chúng đã được tách sẵn ở extractParagraphsRaw — đây
-  // là lý do "Chuẩn hóa Word" trước đó luôn mất hình ảnh. Giờ nối ảnh
-  // (chuyển base64 thành thẻ <img>) vào cuối text của đúng đoạn chứa nó.
   const { images } = await extractImages(zip)
   const imageByRid = new Map(images.filter((img) => img.rId).map((img) => [img.rId, img]))
 
   const documentXml = await zip.file('word/document.xml')?.async('string')
   if (!documentXml) throw new Error('Không tìm thấy document.xml — file Word có thể bị hỏng.')
 
-  const paragraphs = extractParagraphsRaw(documentXml, oleLatexMap)
-  return paragraphs.map((p) => {
+  const paragraphHtml = (p: ParagraphData): string => {
     const imgs = p.imageRIds.map((rid) => imageByRid.get(rid)).filter((x): x is ParsedImage => !!x)
     const imgHtml = imgs.length > 0 ? imagesToHtml(imgs) : ''
-    return { text: (p.text + ' ' + imgHtml).trim(), hasUnderline: p.hasUnderline }
-  })
+    return repairLeftRight((p.text + ' ' + imgHtml).trim())
+  }
+
+  const tableToHtml = (tblXml: string): string => {
+    const rows = tblXml.match(/<w:tr\b[\s\S]*?<\/w:tr>/g) || []
+    const trs = rows.map((tr) => {
+      const cells = tr.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || []
+      const tds = cells.map((tc) => {
+        const inner = extractParagraphsRaw(tc, oleLatexMap, true).map(paragraphHtml).join('<br/>')
+        return `<td style="border:1px solid currentColor;padding:2px 8px;text-align:center;vertical-align:middle">${inner || '&nbsp;'}</td>`
+      })
+      return `<tr>${tds.join('')}</tr>`
+    })
+    return `<table style="border-collapse:collapse;margin:6px 0">${trs.join('')}</table>`
+  }
+
+  const out: { text: string; hasUnderline: boolean }[] = []
+  const blockRe = /<w:tbl>[\s\S]*?<\/w:tbl>|<w:p\b[\s\S]*?<\/w:p>/g
+  let bm: RegExpExecArray | null
+  while ((bm = blockRe.exec(documentXml)) !== null) {
+    const block = bm[0]
+    if (block.startsWith('<w:tbl>')) {
+      out.push({ text: tableToHtml(block), hasUnderline: false })
+      continue
+    }
+    for (const p of extractParagraphsRaw(block, oleLatexMap, true)) {
+      out.push({ text: paragraphHtml(p), hasUnderline: p.hasUnderline })
+    }
+  }
+  return out
 }
 
 export async function parseWordExam(file: File): Promise<ParseWordResult> {
