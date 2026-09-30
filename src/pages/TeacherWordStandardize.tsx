@@ -21,7 +21,7 @@ type ColorScheme = 'black-on-white' | 'white-on-green'
 
 // Nhãn phiên bản — hiện ngay dưới tiêu đề để biết chính xác bản nào đang chạy
 // trên web (nếu vẫn thấy nhãn cũ nghĩa là bản mới CHƯA được triển khai xong).
-const BUILD_TAG = '28-09-2026 · gạch-chân-đúng-chỗ + bảng + sửa-công-thức'
+const BUILD_TAG = '28-09-2026 · PDF chia trang, chụp từng trang (nhanh, không treo)'
 
 export default function TeacherWordStandardize() {
   const [file, setFile] = useState<File | null>(null)
@@ -83,6 +83,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
   const [processing, setProcessing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportNote, setExportNote] = useState<string | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
   const printRef = useRef<HTMLDivElement>(null)
 
   async function handleProcess() {
@@ -99,112 +100,144 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
   }
 
   async function handleDownloadPdf() {
-    if (!printRef.current) return
+    const src = printRef.current
+    if (!src) return
     setExporting(true)
     setExportNote(null)
+    setProgress('Đang chuẩn bị...')
+    let pageDiv: HTMLDivElement | null = null
     try {
-      const node = printRef.current
-      const bg = colorScheme === 'white-on-green' ? '#1f5c3f' : '#ffffff'
-      const scale = 2 // luôn giữ độ nét cao
+      // Kích thước 1 trang A4 theo px CSS (rộng 794px như khung nội dung).
+      const PAGE_W = 794
+      const PAGE_H = 1123
+      const PAD = 40
+      const CONTENT_H = PAGE_H - PAD * 2
+      const BLANK_LINE_PX = 22
+      const dark = colorScheme === 'white-on-green'
+      const bg = dark ? '#1f5c3f' : '#ffffff'
+      const fg = dark ? '#ffffff' : '#111111'
 
-      const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
-      const pageWidthMm = pdf.internal.pageSize.getWidth()
-      const pageHeightMm = pdf.internal.pageSize.getHeight()
+      // Chờ font, ảnh và công thức dựng xong để đo chiều cao chính xác.
+      await (document as any).fonts?.ready
+      const imgs = Array.from(src.querySelectorAll('img'))
+      await Promise.all(imgs.map((im) => (im.decode ? im.decode().catch(() => undefined) : undefined)))
+      await new Promise((r) => setTimeout(r, 300))
 
-      const cssWidth = node.scrollWidth || 794
-      const totalHeightCss = node.scrollHeight
-      const cssPxPerMm = cssWidth / pageWidthMm
-      const idealPageHeightCss = Math.floor(pageHeightMm * cssPxPerMm) // chiều cao 1 trang A4, px CSS gốc (chưa nhân scale)
+      // 1) ĐO chiều cao từng khối (mỗi câu là 1 khối, không bao giờ bị cắt đôi
+      //    giữa 2 trang — trừ khi riêng 1 câu dài hơn cả 1 trang).
+      type PageItem =
+        | { kind: 'block'; el: HTMLElement; shift: number; height: number }
+        | { kind: 'spacer'; height: number }
+      const pages: PageItem[][] = []
+      let cur: PageItem[] = []
+      let y = 0
+      const finish = () => {
+        pages.push(cur)
+        cur = []
+        y = 0
+      }
+      const addSpacer = (px: number) => {
+        let left = px
+        while (left > 0) {
+          const room = CONTENT_H - y
+          if (room <= 0) {
+            finish()
+            continue
+          }
+          const take = Math.min(left, room)
+          cur.push({ kind: 'spacer', height: take })
+          y += take
+          left -= take
+        }
+      }
 
-      // KHÔNG cắt ngang qua ảnh/bảng biến thiên VÀ công thức toán (MathJax
-      // render ra thẻ <mjx-container>) — nếu ranh giới trang (theo chiều
-      // cao cố định) rơi vào GIỮA 1 trong 2 loại này, dịch ranh giới lên
-      // ngay trước nó — trang đó ngắn hơn bình thường 1 chút, nhưng ảnh và
-      // công thức luôn trọn vẹn, không bao giờ bị cắt đôi giữa 2 trang nữa.
-      const containerRect = node.getBoundingClientRect()
-      const imageRanges = Array.from(node.querySelectorAll('img, mjx-container')).map((el) => {
-        const r = el.getBoundingClientRect()
-        return { top: r.top - containerRect.top, bottom: r.bottom - containerRect.top }
-      })
-
-      const pageBreaks: number[] = []
-      {
-        let y = 0
-        while (y < totalHeightCss) {
-          let boundary = Math.min(y + idealPageHeightCss, totalHeightCss)
-          for (const r of imageRanges) {
-            if (boundary > r.top && boundary < r.bottom) {
-              boundary = Math.max(y + Math.floor(idealPageHeightCss * 0.15), r.top)
-              break
+      const blockEls = Array.from(src.querySelectorAll<HTMLElement>('[data-pdf-block]'))
+      for (const el of blockEls) {
+        const h = Math.ceil(el.getBoundingClientRect().height)
+        if (h > 0) {
+          if (h <= CONTENT_H) {
+            if (y + h > CONTENT_H && y > 0) finish()
+            cur.push({ kind: 'block', el, shift: 0, height: h })
+            y += h
+          } else {
+            // Khối cao hơn 1 trang: chia theo từng lát, mỗi lát 1 trang.
+            if (y > 0) finish()
+            for (let shift = 0; shift < h; shift += CONTENT_H) {
+              const part = Math.min(CONTENT_H, h - shift)
+              cur.push({ kind: 'block', el, shift, height: part })
+              y += part
+              if (shift + CONTENT_H < h) finish()
             }
           }
-          pageBreaks.push(boundary)
-          y = boundary
         }
+        // Khoảng trống để học sinh làm bài — không cần render, chỉ chừa chỗ.
+        addSpacer(Number(el.dataset.blank || 0) * BLANK_LINE_PX)
       }
+      if (cur.length > 0) finish()
+      // Bỏ các trang trống ở cuối file (chỉ toàn khoảng trắng).
+      while (pages.length > 0 && pages[pages.length - 1].every((it) => it.kind === 'spacer')) pages.pop()
 
-      // GỘP NHIỀU TRANG vào mỗi lần chụp cho nhanh (thay vì chụp từng trang
-      // một, rất chậm) — mỗi lần chụp tối đa MAX_SAFE_CANVAS_HEIGHT pixel
-      // (đã nhân scale), không bao giờ vượt giới hạn kích thước ảnh an toàn
-      // của trình duyệt (vượt giới hạn này trước đây gây đen/mờ cả trang).
-      const MAX_SAFE_CANVAS_HEIGHT = 14000
-      let batchStart = 0
-      let breakIdx = 0
-      let pageIndex = 0
+      // 2) DỰNG PDF: mỗi trang chỉ chụp đúng nội dung của trang đó; trang toàn
+      //    khoảng trống thì chỉ tô nền, không chụp gì cả.
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+      const wMm = pdf.internal.pageSize.getWidth()
+      const hMm = pdf.internal.pageSize.getHeight()
 
-      while (breakIdx < pageBreaks.length) {
-        let batchEndIdx = breakIdx
-        while (
-          batchEndIdx < pageBreaks.length - 1 &&
-          (pageBreaks[batchEndIdx + 1] - batchStart) * scale <= MAX_SAFE_CANVAS_HEIGHT
-        ) {
-          batchEndIdx++
+      for (let i = 0; i < pages.length; i++) {
+        setProgress(`Đang tạo trang ${i + 1}/${pages.length}...`)
+        // Nhường trình duyệt xử lý giữa các trang để không bị treo ("Page Unresponsive").
+        await new Promise((r) => setTimeout(r, 0))
+
+        if (i > 0) pdf.addPage()
+        if (dark) {
+          pdf.setFillColor(31, 92, 63)
+          pdf.rect(0, 0, wMm, hMm, 'F')
         }
-        const batchEndY = pageBreaks[batchEndIdx]
-        const batchSliceHeightCss = batchEndY - batchStart
+        const items = pages[i]
+        if (!items.some((it) => it.kind === 'block')) continue
 
-        const batchCanvas = await html2canvas(node, {
-          scale,
+        pageDiv = document.createElement('div')
+        pageDiv.style.cssText =
+          `position:absolute;left:-9999px;top:0;width:${PAGE_W}px;height:${PAGE_H}px;box-sizing:border-box;` +
+          `padding:${PAD}px;overflow:hidden;background:${bg};color:${fg};` +
+          `font-family:"Times New Roman",Times,serif;font-size:15px;`
+        for (const it of items) {
+          if (it.kind === 'spacer') {
+            const sp = document.createElement('div')
+            sp.style.height = `${it.height}px`
+            pageDiv.appendChild(sp)
+            continue
+          }
+          const wrap = document.createElement('div')
+          wrap.style.cssText = `height:${it.height}px;overflow:hidden;`
+          const clone = it.el.cloneNode(true) as HTMLElement
+          clone.removeAttribute('data-pdf-block')
+          clone.style.marginTop = `-${it.shift}px`
+          wrap.appendChild(clone)
+          pageDiv.appendChild(wrap)
+        }
+        document.body.appendChild(pageDiv)
+
+        const canvas = await html2canvas(pageDiv, {
+          scale: 2,
           useCORS: true,
           backgroundColor: bg,
-          x: 0,
-          y: batchStart,
-          width: cssWidth,
-          height: batchSliceHeightCss,
+          // Bỏ qua khung nguồn chứa TOÀN BỘ đề khi html2canvas sao chép trang —
+          // đây là chỗ làm chậm/treo trước đây (mỗi lần chụp lại sao chép cả đề).
+          ignoreElements: (el) => el.hasAttribute('data-pdf-source'),
         })
-
-        const pxPerMm = batchCanvas.width / pageWidthMm
-        let prevBreak = batchStart
-        for (let i = breakIdx; i <= batchEndIdx; i++) {
-          const pageEndCss = pageBreaks[i]
-          const sliceTopPx = Math.round((prevBreak - batchStart) * scale)
-          const sliceHeightPx = Math.round((pageEndCss - prevBreak) * scale)
-          const sliceCanvas = document.createElement('canvas')
-          sliceCanvas.width = batchCanvas.width
-          sliceCanvas.height = sliceHeightPx
-          const ctx = sliceCanvas.getContext('2d')!
-          ctx.drawImage(batchCanvas, 0, sliceTopPx, batchCanvas.width, sliceHeightPx, 0, 0, batchCanvas.width, sliceHeightPx)
-          const imgData = sliceCanvas.toDataURL('image/jpeg', 0.95)
-          if (pageIndex > 0) pdf.addPage()
-          // Tô kín nền cả trang trước khi chèn ảnh — trang bị "co ngắn" (để
-          // không cắt ngang ảnh/công thức) và trang cuối sẽ không còn dải trắng.
-          if (colorScheme === 'white-on-green') {
-            pdf.setFillColor(31, 92, 63)
-            pdf.rect(0, 0, pageWidthMm, pageHeightMm, 'F')
-          }
-          pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm)
-          pageIndex++
-          prevBreak = pageEndCss
-        }
-
-        batchStart = batchEndY
-        breakIdx = batchEndIdx + 1
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, wMm, hMm)
+        document.body.removeChild(pageDiv)
+        pageDiv = null
       }
 
+      setProgress('Đang lưu file...')
       pdf.save(`${fileName || 'de'}-khoang-trong.pdf`)
     } catch (err: any) {
       onError('Có lỗi khi xuất PDF: ' + (err.message || err))
     } finally {
+      if (pageDiv && pageDiv.parentNode) pageDiv.parentNode.removeChild(pageDiv)
+      setProgress(null)
       setExporting(false)
     }
   }
@@ -240,22 +273,23 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
             <option value="white-on-green">Nền xanh (bảng viết) — chữ trắng</option>
           </select>
           <button className="btn" onClick={handleDownloadPdf} disabled={exporting} style={{ marginTop: 12 }}>
-            {exporting ? '⏳ Đang tạo PDF...' : '⬇ Tải PDF'}
+            {exporting ? `⏳ ${progress || 'Đang tạo PDF...'}` : '⬇ Tải PDF'}
           </button>
           {exportNote && <p style={{ fontSize: 12.5, marginTop: 8, color: 'var(--danger)' }}>{exportNote}</p>}
 
-          <div style={{ position: 'absolute', left: -9999, top: 0 }}>
-            <div ref={printRef} style={{ width: '794px', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}>
-              {fileName && <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>}
+          <div data-pdf-source="1" style={{ position: 'absolute', left: -9999, top: 0 }}>
+            <div
+              ref={printRef}
+              style={{ width: '794px', boxSizing: 'border-box', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}
+            >
+              {fileName && (
+                <div data-pdf-block="1" data-blank="0" style={{ display: 'flow-root' }}>
+                  <h2 style={{ color: textColor, textAlign: 'center' }}>{fileName}</h2>
+                </div>
+              )}
               {blocks.map((b) => (
-                <div key={b.id}>
+                <div key={b.id} data-pdf-block="1" data-blank={b.number !== null ? blankLines : 0} style={{ display: 'flow-root' }}>
                   {renderQuestionOnly(b, textColor)}
-                  {b.number !== null &&
-                    Array.from({ length: blankLines }).map((_, k) => (
-                      <p key={`blank-${k}`} style={{ margin: 0, minHeight: 22 }}>
-                        &nbsp;
-                      </p>
-                    ))}
                 </div>
               ))}
             </div>
