@@ -61,12 +61,25 @@ function MathRenderer({ html, className = '', block = false }: Props) {
   }, [html])
 
   const Tag = block ? 'div' : 'span'
+  // CÔNG CỤ TẠM THỜI để tìm đúng nguyên nhân lỗi công thức: mở Console của
+  // trình duyệt (F12) → gõ đúng dòng sau rồi bấm Enter → tải lại trang:
+  //   window.__MJX_DEBUG__ = true
+  // Mỗi công thức sẽ hiện thêm dòng mã LaTeX thô màu vàng ngay dưới bản vẽ,
+  // giúp biết chính xác mã gốc có đúng không trước khi MathJax vẽ ra.
+  const debugOn = typeof window !== 'undefined' && (window as any).__MJX_DEBUG__
   return (
-    <Tag
-      ref={ref as any}
-      className={className}
-      style={{ whiteSpace: block ? 'pre-wrap' : 'normal', overflowWrap: 'anywhere' }}
-    />
+    <>
+      <Tag
+        ref={ref as any}
+        className={className}
+        style={{ whiteSpace: block ? 'pre-wrap' : 'normal', overflowWrap: 'anywhere' }}
+      />
+      {debugOn && (
+        <div style={{ fontSize: 10, color: '#ffd400', background: '#000', padding: '2px 4px', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+          {html}
+        </div>
+      )}
+    </>
   )
 }
 
