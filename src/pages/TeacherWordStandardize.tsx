@@ -122,6 +122,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
       const imgs = Array.from(src.querySelectorAll('img'))
       await Promise.all(imgs.map((im) => (im.decode ? im.decode().catch(() => undefined) : undefined)))
       await new Promise((r) => setTimeout(r, 300))
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
 
       // 1) ĐO chiều cao từng khối (mỗi câu là 1 khối, không bao giờ bị cắt đôi
       //    giữa 2 trang — trừ khi riêng 1 câu dài hơn cả 1 trang).
@@ -153,7 +154,18 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
 
       const blockEls = Array.from(src.querySelectorAll<HTMLElement>('[data-pdf-block]'))
       for (const el of blockEls) {
-        const h = Math.ceil(el.getBoundingClientRect().height)
+        let h = Math.ceil(el.getBoundingClientRect().height)
+        // Phòng trường hợp ảnh trong câu chưa kịp có kích thước ngay lúc đo
+        // (trình duyệt trả về chiều cao 0 dù ảnh đã tải xong) — trước đây cả
+        // câu bị bỏ qua hoàn toàn trong mọi trang, làm mất hẳn cả câu lẫn ảnh.
+        // Giờ tính tạm chiều cao dựa theo kích thước gốc của ảnh, không bỏ sót.
+        if (h === 0) {
+          const img = el.querySelector('img') as HTMLImageElement | null
+          if (img && img.naturalWidth > 0) {
+            const w = el.clientWidth || PAGE_W - PAD * 2
+            h = Math.ceil((img.naturalHeight / img.naturalWidth) * w) + 24
+          }
+        }
         if (h > 0) {
           if (h <= CONTENT_H) {
             if (y + h > CONTENT_H && y > 0) finish()
@@ -200,7 +212,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
         pageDiv.style.cssText =
           `position:absolute;left:-9999px;top:0;width:${PAGE_W}px;height:${PAGE_H}px;box-sizing:border-box;` +
           `padding:${PAD}px;overflow:hidden;background:${bg};color:${fg};` +
-          `font-family:"Times New Roman",Times,serif;font-size:15px;`
+          `font-family:"Times New Roman",Times,serif;font-size:15px;line-height:2.1;`
         for (const it of items) {
           if (it.kind === 'spacer') {
             const sp = document.createElement('div')
@@ -280,7 +292,7 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
           <div data-pdf-source="1" style={{ position: 'absolute', left: -9999, top: 0 }}>
             <div
               ref={printRef}
-              style={{ width: '794px', boxSizing: 'border-box', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15 }}
+              style={{ width: '794px', boxSizing: 'border-box', background: pageBg, color: textColor, padding: 40, fontFamily: '"Times New Roman", Times, serif', fontSize: 15, lineHeight: 2.1 }}
             >
               {fileName && (
                 <div data-pdf-block="1" data-blank="0" style={{ display: 'flow-root' }}>
