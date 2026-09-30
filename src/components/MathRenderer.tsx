@@ -27,6 +27,24 @@ function MathRenderer({ html, className = '', block = false }: Props) {
   const lastValue = useRef<string>('')
 
   useEffect(() => {
+    // "overflow-wrap: anywhere" đặt trên khung ngoài (để chữ thường dài
+    // không tràn khung) bị THỪA KẾ xuống bên trong công thức MathJax vẽ ra
+    // — trình duyệt hiểu nhầm là được phép ngắt dòng ngay giữa cấu trúc
+    // tử số/mẫu số của phân thức (mjx-frac xếp dọc), làm mẫu số bị "ngắt
+    // xuyên" và co dúm lại. Công thức 1 dòng (không có cấu trúc xếp tầng)
+    // không bị ảnh hưởng nên nhìn vẫn bình thường. Chỉ cần chèn 1 lần duy
+    // nhất 1 quy tắc CSS loại trừ riêng phần tử MathJax khỏi việc kế thừa
+    // này — không đụng gì đến thuộc tính overflowWrap của khung ngoài.
+    if (!document.getElementById('mjx-overflow-fix')) {
+      const style = document.createElement('style')
+      style.id = 'mjx-overflow-fix'
+      style.textContent =
+        'mjx-container, mjx-container * { overflow-wrap: normal !important; word-break: normal !important; }'
+      document.head.appendChild(style)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!ref.current) return
     if (lastValue.current === html) return
     ref.current.innerHTML = html
