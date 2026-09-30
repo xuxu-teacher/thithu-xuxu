@@ -50,6 +50,17 @@ function MathRenderer({ html, className = '', block = false }: Props) {
     ref.current.innerHTML = html
     lastValue.current = html
 
+    // CÔNG CỤ TẠM THỜI để tìm đúng nguyên nhân lỗi công thức: mở Console
+    // (F12) → gõ "allow pasting" nếu bị chặn → gõ window.__MJX_DEBUG__ = true
+    // → Enter → tải lại trang. In thẳng ra Console (KHÔNG vẽ lên màn hình)
+    // vì nhiều nơi trong app dựng công thức ở vùng ẩn ngoài màn hình (chỉ để
+    // chụp ảnh xuất PDF) — vẽ lên màn hình ở những chỗ đó sẽ không bao giờ
+    // nhìn thấy được. Chỉ in ra dòng nào CÓ vẻ là phân thức/công thức phức
+    // tạp (chứa "frac" hoặc nhiều dấu \) để đỡ ngập Console vì quá nhiều dòng.
+    if ((window as any).__MJX_DEBUG__ && /frac|\\\\[a-zA-Z]{3,}/.test(html)) {
+      console.log('%c[MJX_DEBUG] mã gốc:', 'color:#ffd400;font-weight:bold', html)
+    }
+
     const timer = window.setTimeout(() => {
       if (!ref.current || !window.MathJax?.typesetPromise) return
       window.MathJax.typesetClear?.([ref.current])
@@ -61,25 +72,12 @@ function MathRenderer({ html, className = '', block = false }: Props) {
   }, [html])
 
   const Tag = block ? 'div' : 'span'
-  // CÔNG CỤ TẠM THỜI để tìm đúng nguyên nhân lỗi công thức: mở Console của
-  // trình duyệt (F12) → gõ đúng dòng sau rồi bấm Enter → tải lại trang:
-  //   window.__MJX_DEBUG__ = true
-  // Mỗi công thức sẽ hiện thêm dòng mã LaTeX thô màu vàng ngay dưới bản vẽ,
-  // giúp biết chính xác mã gốc có đúng không trước khi MathJax vẽ ra.
-  const debugOn = typeof window !== 'undefined' && (window as any).__MJX_DEBUG__
   return (
-    <>
-      <Tag
-        ref={ref as any}
-        className={className}
-        style={{ whiteSpace: block ? 'pre-wrap' : 'normal', overflowWrap: 'anywhere' }}
-      />
-      {debugOn && (
-        <div style={{ fontSize: 10, color: '#ffd400', background: '#000', padding: '2px 4px', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
-          {html}
-        </div>
-      )}
-    </>
+    <Tag
+      ref={ref as any}
+      className={className}
+      style={{ whiteSpace: block ? 'pre-wrap' : 'normal', overflowWrap: 'anywhere' }}
+    />
   )
 }
 
