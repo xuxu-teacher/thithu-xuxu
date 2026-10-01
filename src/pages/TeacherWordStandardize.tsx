@@ -237,6 +237,18 @@ function PdfBlankTool({ file, fileName, onError }: { file: File; fileName: strin
           // Bỏ qua khung nguồn chứa TOÀN BỘ đề khi html2canvas sao chép trang —
           // đây là chỗ làm chậm/treo trước đây (mỗi lần chụp lại sao chép cả đề).
           ignoreElements: (el) => el.hasAttribute('data-pdf-source'),
+          // index.html đặt "mjx-container { overflow-y: hidden; overflow-x: auto }".
+          // Trên màn hình quy tắc này vô hại (mjx-container là phần tử inline nên
+          // trình duyệt bỏ qua overflow), nhưng html2canvas vẫn CẮT theo khung
+          // của nó — mà MathJax đặt line-height:0 cho mjx-container nên khung chỉ
+          // cao ~1 dòng chữ → hệ { 2 dòng, phân số, căn... bị cắt mất phần trên/dưới.
+          // Chỉ gỡ quy tắc này trong bản sao dùng để chụp, không ảnh hưởng giao diện.
+          onclone: (doc) => {
+            const st = doc.createElement('style')
+            st.textContent =
+              'mjx-container, mjx-container * { overflow: visible !important; max-width: none !important; }'
+            doc.head.appendChild(st)
+          },
         })
         pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, wMm, hMm)
         document.body.removeChild(pageDiv)
