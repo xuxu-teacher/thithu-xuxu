@@ -18,9 +18,32 @@ function downloadSampleExcel() {
   ]
   const ws = XLSX.utils.json_to_sheet(sample)
   ws['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 16 }]
+  // Định dạng cột Mã học sinh + Số điện thoại là Văn bản (@) — để khi giáo viên
+  // gõ "0867..." Excel không tự đổi thành số và làm mất số 0 đầu.
+  for (let r = 1; r <= 500; r++) {
+    for (const col of ['B', 'C']) {
+      const ref = `${col}${r + 1}`
+      if (!ws[ref]) ws[ref] = { t: 's', v: '' }
+      ws[ref].z = '@'
+    }
+  }
+  ws['!ref'] = 'A1:C501'
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Danh sách học sinh')
   XLSX.writeFile(wb, 'mau_danh_sach_hoc_sinh.xlsx')
+}
+
+/**
+ * Chuẩn hóa số điện thoại đọc từ Excel. Excel tự đổi ô "0867773187" thành
+ * SỐ 867773187 (mất số 0 đầu) — nếu dùng nguyên số đó làm mật khẩu, học sinh
+ * gõ đúng số điện thoại của mình (có số 0) sẽ KHÔNG đăng nhập được.
+ */
+function normalizePhone(val: unknown): string {
+  let d = String(val ?? '').trim().replace(/[^0-9]/g, '')
+  if (!d) return ''
+  if (d.startsWith('84') && d.length === 11) d = '0' + d.slice(2) // +84xxxxxxxxx
+  if (d.length === 9 && !d.startsWith('0')) d = '0' + d // mất số 0 đầu
+  return d
 }
 
 interface ExcelRow {
@@ -111,9 +134,13 @@ export default function TeacherClassDetail() {
       const sheet = wb.Sheets[wb.SheetNames[0]]
       const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' })
 
+      // LƯU Ý: chữ "đ" KHÔNG tách dấu được bằng NFD (nó là 1 chữ riêng, không
+      // phải "d" + dấu) — trước đây bị xóa luôn, nên "Số điện thoại" thành
+      // "soienthoai", "SĐT" thành "st" → KHÔNG BAO GIỜ nhận ra cột số điện thoại.
       const normalizeKey = (k: string) =>
         k
           .toLowerCase()
+          .replace(/đ/g, 'd')
           .normalize('NFD')
           .replace(/[\u0300-\u036f]/g, '')
           .replace(/[^a-z0-9]/g, '')
@@ -127,7 +154,7 @@ export default function TeacherClassDetail() {
             const nk = normalizeKey(key)
             if (['hovaten', 'hoten', 'name', 'hovaten1', 'tenhocsinh'].includes(nk)) name = String(val).trim()
             if (['mahocsinh', 'maso', 'code', 'masohocsinh', 'ma'].includes(nk)) code = String(val).trim()
-            if (['sodienthoai', 'sdt', 'dienthoai', 'phone', 'sodt'].includes(nk)) phone = String(val).trim().replace(/[^0-9]/g, '')
+            if (['sodienthoai', 'sdt', 'dienthoai', 'phone', 'sodt'].includes(nk)) phone = normalizePhone(val)
           }
           return { name, code, phone }
         })
@@ -143,15 +170,24 @@ export default function TeacherClassDetail() {
       }
 
       let success = 0
-      let failed = 0
       let withPhone = 0
+      // Ghi lại ĐÚNG lý do từng dòng lỗi (trước đây chỉ đếm, bỏ mất thông báo
+      // lỗi thật của Supabase nên không biết vì sao lỗi).
+      const dupInSystem: string[] = []
+      const dupInFile: string[] = []
+      const otherErrors: string[] = []
+      const seenCodes = new Set<string>()
 
       for (const row of parsed) {
         const code = row.code || randomCode('HS')
+        // Mã học sinh là tên đăng nhập nên phải DUY NHẤT trên TOÀN HỆ THỐNG
+        // (cột student_code có ràng buộc unique cho mọi lớp, mọi giáo viên).
+        if (seenCodes.has(code.toUpperCase())) { dupInFile.push(code); continue }
+        seenCodes.add(code.toUpperCase())
+
         const password = row.phone || Math.random().toString(36).slice(2, 8)
-        if (row.phone) withPhone++
         const { data: hashed, error: hashErr } = await supabase.rpc('hash_password', { plain: password })
-        if (hashErr) { failed++; continue }
+        if (hashErr) { otherErrors.push(`${code} (${row.name}): ${hashErr.message}`); continue }
         const { error: insErr } = await supabase.from('students').insert({
           class_id: classId,
           student_code: code,
@@ -159,16 +195,30 @@ export default function TeacherClassDetail() {
           phone: row.phone || null,
           password_hash: hashed,
         })
-        if (insErr) failed++
-        else success++
+        if (insErr) {
+          if (insErr.code === '23505') dupInSystem.push(code)
+          else otherErrors.push(`${code} (${row.name}): ${insErr.message}`)
+          continue
+        }
+        success++
+        if (row.phone) withPhone++
       }
 
-      setImportResult(
-        `Đã thêm thành công ${success}/${parsed.length} học sinh` +
-          (failed > 0 ? ` (${failed} dòng lỗi — có thể do trùng mã học sinh).` : '.') +
-          ` Trong đó ${withPhone} em có số điện thoại → mật khẩu ban đầu chính là số điện thoại của em đó; ` +
-          `${success - withPhone} em còn lại được sinh mật khẩu ngẫu nhiên (báo học sinh vào mục "Đổi mật khẩu" để tự đặt lại).`
-      )
+      const failed = dupInSystem.length + dupInFile.length + otherErrors.length
+      let msg =
+        `Đã thêm thành công ${success}/${parsed.length} học sinh. ` +
+        `Trong đó ${withPhone} em có số điện thoại → mật khẩu ban đầu chính là số điện thoại của em đó; ` +
+        `${success - withPhone} em còn lại được sinh mật khẩu ngẫu nhiên (báo học sinh vào mục "Đổi mật khẩu" để tự đặt lại).`
+      if (failed > 0) {
+        msg += `\n\n⚠ ${failed} dòng KHÔNG thêm được:`
+        if (dupInSystem.length)
+          msg +=
+            `\n• ${dupInSystem.length} mã đã có người dùng trong hệ thống (mã học sinh là tên đăng nhập nên không được trùng với BẤT KỲ lớp nào, kể cả lớp của giáo viên khác): ${dupInSystem.join(', ')}.` +
+            ` Cách xử lý: đặt mã riêng cho lớp (VD thêm tên lớp: 10A1-HS01) hoặc để trống cột "Mã học sinh" để hệ thống tự sinh mã.`
+        if (dupInFile.length) msg += `\n• ${dupInFile.length} mã bị lặp lại ngay trong file: ${dupInFile.join(', ')}.`
+        if (otherErrors.length) msg += `\n• Lỗi khác: ${otherErrors.join('; ')}`
+      }
+      setImportResult(msg)
       loadAll()
     } catch (err: any) {
       setImportResult(`Lỗi khi đọc file Excel: ${err.message || err}`)
@@ -280,7 +330,7 @@ export default function TeacherClassDetail() {
         </div>
 
         {importing && <p>Đang import danh sách...</p>}
-        {importResult && <div className="explanation">{importResult}</div>}
+        {importResult && <div className="explanation" style={{ whiteSpace: 'pre-line' }}>{importResult}</div>}
         {lastCreated && (
           <p className="explanation">
             Đã tạo tài khoản — Mã HS: <b>{lastCreated.code}</b>, Mật khẩu: <b>{lastCreated.password}</b>{' '}
