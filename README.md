@@ -138,3 +138,23 @@ supabase/
 - Chưa có chức năng chống gian lận (khoá tab, giám sát camera...) — có thể bổ sung thêm nếu cần.
 - Chưa có thanh soạn thảo WYSIWYG cho nội dung câu hỏi (đang dùng textarea chỉnh HTML thô) — có
   thể thay bằng TipTap/Quill nếu muốn giáo viên soạn trực tiếp không cần biết HTML.
+
+## 11. Gán ID6 cho đề thi (trang `/teacher/gan-id`, menu **Gán ID**)
+
+Tải PDF đề có lời giải (hoặc 2 file: đề trước, lời giải sau) → AI (Gemini) đọc từng câu và chọn
+dạng theo bảng chia dạng ID6 → giáo viên rà, sửa trong bảng → **Tải file Word** (trùng tên file PDF,
+định dạng như mẫu: `Câu n.  [2D1H2-2]` theo 3 phần).
+
+- Bảng dạng: `src/data/id6Taxonomy.ts` (532 dạng, sinh từ file `GV-bang-chia-dang-toan-TEX-ID6`).
+- Mẫu Word (header/footer, lề): `public/templates/mau-gan-id6.docx`.
+- Mức độ: câu có nhãn `[MĐ1]…[MĐ4]` quy đổi theo bảng trên trang (mặc định N/H/V/C); câu không
+  có nhãn do AI đánh giá.
+- PDF scan (không có lớp chữ, ≤ 3,2 MB) được gửi nguyên file cho AI đọc.
+
+**Cài đặt (1 lần):**
+1. `npm install` (thêm thư viện `pdfjs-dist`).
+2. Lấy API key tại https://aistudio.google.com/apikey.
+3. Vercel → Project thithu-xuxu → Settings → Environment Variables: thêm `GEMINI_API_KEY`
+   (không có tiền tố `VITE_`). Tuỳ chọn `GEMINI_MODEL`. Redeploy.
+4. Hàm máy chủ nằm ở `api/gemini.ts` — chỉ chạy trên Vercel (`vercel dev` khi thử ở máy;
+   `npm run dev` thường không có `/api`).

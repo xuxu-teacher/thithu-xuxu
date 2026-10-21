@@ -9,22 +9,9 @@ import TeacherDashboard from './pages/TeacherDashboard'
 import TeacherClassDetail from './pages/TeacherClassDetail'
 import TeacherExamCreate from './pages/TeacherExamCreate'
 import TeacherExamResults from './pages/TeacherExamResults'
-import TeacherExamEdit from './pages/TeacherExamEdit'
 import TeacherAllExams from './pages/TeacherAllExams'
-import TeacherLessons from './pages/TeacherLessons'
-import TeacherQuestionBankUpload from './pages/TeacherQuestionBankUpload'
-import TeacherExamFromMatrix from './pages/TeacherExamFromMatrix'
-import TeacherExamCreateHub from './pages/TeacherExamCreateHub'
-import TeacherManagement from './pages/TeacherManagement'
-import TeacherWordStandardize from './pages/TeacherWordStandardize'
-import StudentDisclosurePage from './pages/StudentDisclosurePage'
-import StudentTuitionApplication from './pages/StudentTuitionApplication'
-import TeacherExamSimilar from './pages/TeacherExamSimilar'
-import TeacherPracticeExamCreate from './pages/TeacherPracticeExamCreate'
-import StudentPracticeList from './pages/StudentPracticeList'
-import StudentPracticeTake from './pages/StudentPracticeTake'
+import TeacherAssignId from './pages/TeacherAssignId'
 import StudentDashboard from './pages/StudentDashboard'
-import StudentLessons from './pages/StudentLessons'
 import StudentExamTake from './pages/StudentExamTake'
 import StudentResult from './pages/StudentResult'
 
@@ -70,10 +57,10 @@ export default function App() {
           }
         />
         <Route
-          path="/teacher/exams/:examId/edit"
+          path="/teacher/gan-id"
           element={
             <TeacherRoute>
-              <TeacherExamEdit />
+              <TeacherAssignId />
             </TeacherRoute>
           }
         />
@@ -86,110 +73,6 @@ export default function App() {
           }
         />
 
-        <Route
-          path="/teacher/classes/:classId/exams/new-hub"
-          element={
-            <TeacherRoute>
-              <TeacherExamCreateHub />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/management"
-          element={
-            <TeacherRoute>
-              <TeacherManagement />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/question-bank"
-          element={
-            <TeacherRoute>
-              <TeacherQuestionBankUpload />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/classes/:classId/exams/new-from-matrix"
-          element={
-            <TeacherRoute>
-              <TeacherExamFromMatrix />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/exams/:examId/similar"
-          element={
-            <TeacherRoute>
-              <TeacherExamSimilar />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/classes/:classId/practice/new"
-          element={
-            <TeacherRoute>
-              <TeacherPracticeExamCreate />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/teacher/word-standardize"
-          element={
-            <TeacherRoute>
-              <TeacherWordStandardize />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/student/disclosure"
-          element={
-            <StudentRoute>
-              <StudentDisclosurePage />
-            </StudentRoute>
-          }
-        />
-        <Route
-          path="/student/tuition-application"
-          element={
-            <StudentRoute>
-              <StudentTuitionApplication />
-            </StudentRoute>
-          }
-        />
-        <Route
-          path="/student/practice"
-          element={
-            <StudentRoute>
-              <StudentPracticeList />
-            </StudentRoute>
-          }
-        />
-        <Route
-          path="/student/practice/:practiceExamId"
-          element={
-            <StudentRoute>
-              <StudentPracticeTake />
-            </StudentRoute>
-          }
-        />
-        <Route
-          path="/teacher/lessons"
-          element={
-            <TeacherRoute>
-              <TeacherLessons />
-            </TeacherRoute>
-          }
-        />
-        <Route
-          path="/student/lessons"
-          element={
-            <StudentRoute>
-              <StudentLessons />
-            </StudentRoute>
-          }
-        />
         <Route
           path="/student/dashboard"
           element={
