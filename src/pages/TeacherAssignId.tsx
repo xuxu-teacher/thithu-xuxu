@@ -1,7 +1,7 @@
 import { ChangeEvent, useMemo, useState } from 'react'
 import { extractPdfText } from '../utils/pdfText'
-import { PartNo, SplitQuestion, splitQuestions } from '../utils/questionSplitter'
-import { AiMeta, ClassifiedItem, classifyPdfDirect, classifyQuestions } from '../utils/aiClassify'
+import { PartNo, splitQuestions } from '../utils/questionSplitter'
+import { AiMeta, ClassifiedItem, classifyExam } from '../utils/aiClassify'
 import {
   Level,
   LEVELS,
@@ -28,14 +28,14 @@ interface Row {
 }
 
 function metaNotice(meta: AiMeta): string {
-  if (meta.fromCache) return 'Đề này đã gán trước đó — dùng lại kết quả đã lưu, không tốn lượt AI. Bấm "Gán lại bằng AI" nếu muốn chạy lại.'
-  return meta.provider === 'claude'
+  const how = meta.mode === 'pdf' ? 'AI đọc trực tiếp file PDF' : 'AI đọc chữ rút từ PDF (file quá lớn để gửi nguyên)'
+  if (meta.fromCache) return `${how}. Đề này đã gán trước đó — dùng lại kết quả đã lưu, không tốn lượt AI. Bấm "Gán lại bằng AI" nếu muốn chạy lại.`
+  return `${how}. ` + (meta.provider === 'claude'
     ? `AI dùng: ${meta.model} (dự phòng trả phí, vì Gemini miễn phí đã hết lượt hôm nay).`
-    : `AI dùng: ${meta.model} (miễn phí).`
+    : `AI dùng: ${meta.model} (miễn phí).`)
 }
 
 const DEFAULT_MD_MAP: Record<number, Level> = { 1: 'N', 2: 'H', 3: 'V', 4: 'C' }
-const MIN_TEXT_CHARS = 400
 
 function excerptOf(text: string): string {
   return text
@@ -77,54 +77,65 @@ export default function TeacherAssignId() {
     setNotices([])
     setRows([])
     try {
-      setStatus('Đang đọc chữ trong file PDF…')
+      // 1) Rút chữ để đối chiếu số câu (và dự phòng khi file quá lớn)
+      setStatus('Đang đọc file PDF…')
       let fullText = ''
       for (const f of files) {
-        const { text } = await extractPdfText(f)
-        fullText += text + '\n'
+        try {
+          fullText += (await extractPdfText(f)).text + '\n'
+        } catch {
+          /* PDF lỗi lớp chữ — vẫn gửi nguyên file cho AI */
+        }
       }
-
       const split = splitQuestions(fullText)
+      const localByKey = new Map(split.questions.map((q) => [`${q.part}-${q.num}`, q]))
       const msgs: string[] = []
-      let result: Row[] = []
 
-      const isScanned = fullText.replace(/\s/g, '').length < MIN_TEXT_CHARS || split.questions.length < 3
-      if (isScanned) {
-        msgs.push('PDF gần như không có lớp chữ (file scan) — đã gửi nguyên file cho AI tự đọc. Hãy rà kỹ số câu và ID.')
-        setStatus('Đang gửi file PDF cho AI đọc và gán ID… (có thể mất 30–60 giây)')
-        const { items, meta } = await classifyPdfDirect(files[0], { force })
-        msgs.push(metaNotice(meta))
-        result = items
-          .sort((a, b) => a.part - b.part || a.num - b.num)
-          .map((it) => toRow(it, it.mdTag ?? null, '', it.mdTag ?? null))
-      } else {
-        if (split.usedSolutionSection) msgs.push('Đã dùng phần LỜI GIẢI CHI TIẾT để gán ID (có cả đề và lời giải).')
-        msgs.push(...split.warnings)
-        const counts = ([1, 2, 3] as PartNo[]).map((p) => split.questions.filter((q) => q.part === p).length)
-        msgs.push(`Tách được ${split.questions.length} câu: Phần I ${counts[0]}, Phần II ${counts[1]}, Phần III ${counts[2]}.`)
-        setStatus(`Đang gửi ${split.questions.length} câu cho AI gán ID…`)
-        const { items, meta } = await classifyQuestions(split.questions, { force })
-        msgs.push(metaNotice(meta))
-        const byKey = new Map(items.map((it) => [`${it.part}-${it.num}`, it]))
-        result = split.questions.map((q: SplitQuestion) => {
-          const it = byKey.get(`${q.part}-${q.num}`)
-          if (!it) {
-            return {
-              key: `${q.part}-${q.num}`,
-              part: q.part,
-              num: q.num,
-              excerpt: excerptOf(q.text),
-              mdTag: q.mdTag,
-              dangInput: '',
-              level: levelFor(q.mdTag, 'H'),
-              aiNote: 'AI không trả kết quả cho câu này',
-              aiInvalid: '(thiếu)',
-            }
-          }
-          return toRow(it, q.mdTag, excerptOf(q.text), q.mdTag)
-        })
+      // 2) Gửi cả đề cho AI trong 1 lượt
+      setStatus('AI đang đọc đề và gán ID… (thường 20–60 giây)')
+      const { items, declared, meta } = await classifyExam(files, split.questions, { force })
+      msgs.push(metaNotice(meta))
+
+      // 3) Ghép kết quả + bổ sung câu AI bỏ sót
+      const result: Row[] = items.map((it) => {
+        const local = localByKey.get(`${it.part}-${it.num}`)
+        const md = it.mdTag ?? local?.mdTag ?? null
+        const excerpt =
+          meta.mode === 'pdf' ? it.start || (local ? excerptOf(local.text) : '') : local ? excerptOf(local.text) : it.start || ''
+        return toRow(it, md, excerpt, md)
+      })
+      const missing: string[] = []
+      for (const p of [1, 2, 3] as PartNo[]) {
+        const aiNums = items.filter((it) => it.part === p).map((it) => it.num)
+        const localCount = split.questions.filter((q) => q.part === p).length
+        const expected = Math.max(declared[p] ?? 0, localCount, aiNums.length ? Math.max(...aiNums) : 0)
+        for (let n = 1; n <= expected; n++) {
+          if (aiNums.includes(n)) continue
+          const local = localByKey.get(`${p}-${n}`)
+          missing.push(`Phần ${p} câu ${n}`)
+          result.push({
+            key: `${p}-${n}-missing`,
+            part: p,
+            num: n,
+            excerpt: local ? excerptOf(local.text) : '',
+            mdTag: local?.mdTag ?? null,
+            dangInput: '',
+            level: levelFor(local?.mdTag ?? null, 'H'),
+            aiNote: '',
+            aiInvalid: '(AI bỏ sót câu này — hãy chọn dạng)',
+          })
+        }
       }
+      result.sort((x, y) => x.part - y.part || x.num - y.num)
 
+      const cnt = (p: PartNo) => result.filter((r) => r.part === p).length
+      msgs.push(`Tổng ${result.length} câu: Phần I ${cnt(1)}, Phần II ${cnt(2)}, Phần III ${cnt(3)}.`)
+      const declaredText = ([1, 2, 3] as PartNo[])
+        .filter((p) => declared[p])
+        .map((p) => `Phần ${p}: ${declared[p]}`)
+        .join(', ')
+      if (declaredText) msgs.push(`Số câu đề ghi: ${declaredText}.`)
+      if (missing.length) msgs.push(`⚠ Đã thêm dòng trống cho câu AI bỏ sót: ${missing.join(', ')}.`)
       const needFix = result.filter((r) => !isValidDang(toDangCode(r.dangInput) || '')).length
       if (needFix) msgs.push(`${needFix} câu chưa có mã hợp lệ (tô đỏ) — hãy chọn lại dạng trước khi tải Word.`)
       setRows(result)

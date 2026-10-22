@@ -12,8 +12,27 @@ export interface ClassifiedItem {
   note: string
   /** Mã AI trả về nhưng không có trong bảng */
   invalidCode?: string
-  /** Nhãn [MĐx] AI đọc được (chỉ dùng khi gửi thẳng PDF scan) */
+  /** Nhãn [MĐx] AI đọc được trong đề */
   mdTag?: number | null
+  /** Vài chữ đầu của câu do AI chép lại từ đề — để giáo viên đối chiếu đúng câu */
+  start?: string
+}
+
+/** Số câu mỗi phần mà đề tự ghi (vd "từ câu 1 đến câu 12") — AI đọc từ đề */
+export type DeclaredCounts = Partial<Record<PartNo, number>>
+
+export interface AiMeta {
+  provider: string
+  model: string
+  fromCache: boolean
+  /** 'pdf' = AI đọc thẳng file PDF; 'text' = AI đọc chữ rút từ PDF */
+  mode: 'pdf' | 'text'
+}
+
+export interface ClassifyResult {
+  items: ClassifiedItem[]
+  declared: DeclaredCounts
+  meta: AiMeta
 }
 
 const PART_NAMES: Record<PartNo, string> = {
@@ -21,6 +40,9 @@ const PART_NAMES: Record<PartNo, string> = {
   2: 'Phần II – trắc nghiệm đúng/sai (mỗi câu có 4 ý a, b, c, d)',
   3: 'Phần III – trắc nghiệm trả lời ngắn',
 }
+
+/** Tổng dung lượng PDF tối đa gửi thẳng cho AI (giới hạn 4,5 MB/yêu cầu của Vercel, base64 tăng ~33%) */
+export const MAX_PDF_BYTES = 3.2 * 1024 * 1024
 
 function systemPrompt(): string {
   return `Bạn là giáo viên Toán THPT (chương trình GDPT 2018) chuyên gán ID phân loại câu hỏi theo BẢNG CHIA DẠNG ID6 bên dưới.
@@ -32,29 +54,26 @@ QUY TẮC
 4. Phân biệt lớp theo chương trình mới:
    - Xác suất có điều kiện, công thức xác suất toàn phần, Bayes → lớp 12 (2D6…).
    - Biến cố hợp/giao, quy tắc cộng/nhân xác suất → lớp 11 (1D9…). Xác suất cổ điển, đếm không gian mẫu → lớp 10 (0D0…).
-   - Véc-tơ trong không gian (chưa toạ độ) và toạ độ véc-tơ, toạ độ điểm trong Oxyz → 2H2…; phương trình mặt phẳng, đường thẳng, mặt cầu → 2H5….
+   - Véc-tơ, lực, tổng hợp lực trong KHÔNG GIAN (chưa toạ độ) → 2H2X1…; toạ độ véc-tơ, toạ độ điểm trong Oxyz → 2H2X2…; phương trình mặt phẳng, đường thẳng, mặt cầu → 2H5…. Chỉ dùng véc-tơ lớp 10 (0H5…) khi bài hoàn toàn trong mặt phẳng.
    - Mẫu số liệu ghép nhóm: số trung bình, trung vị, tứ phân vị, mốt → 1D5…; khoảng biến thiên, khoảng tứ phân vị, phương sai, độ lệch chuẩn → 2D3….
    - Hàm số mũ, lôgarit, phương trình/bất phương trình mũ-lôgarit → 1D6…; góc, khoảng cách, thể tích trong không gian → 1H8….
 5. Mức độ: N = nhận biết, H = thông hiểu, V = vận dụng, C = vận dụng cao. Tham khảo: Phần I thường N hoặc H; Phần II thường H hoặc V; Phần III thường V hoặc C (bài nhiều bước, mô hình hoá phức tạp → C).
-6. "note": tối đa 15 từ, nêu kiến thức chính.
+6. "start": chép NGUYÊN VĂN khoảng 12–15 chữ đầu của đề bài câu đó (bỏ chữ "Câu n." và nhãn [MĐ]), để giáo viên đối chiếu.
+7. "md": nếu đề ghi nhãn mức độ như [MĐ1], [MĐ2]… cho câu đó thì ghi số đó, không có thì để null.
+8. "note": tối đa 15 từ, nêu kiến thức chính.
+9. KHÔNG được bỏ sót câu nào. Số câu đánh lại từ 1 ở mỗi phần. "declared": số câu của từng phần theo lời dẫn của đề (vd "từ câu 1 đến câu 12" → 12); không thấy thì đếm.
 
 Trả về JSON đúng dạng:
-{"items":[{"part":1,"num":1,"code":"2H2X2-2","level":"N","note":"..."}]}
+{"declared":{"1":12,"2":4,"3":6},"items":[{"part":1,"num":1,"start":"Cho hàm số y = f(x) có đạo hàm …","md":1,"code":"2H2X2-2","level":"N","note":"..."}]}
 
 BẢNG CHIA DẠNG ID6
 ${taxonomyPromptText()}`
 }
 
-export interface AiMeta {
-  provider: string
-  model: string
-  fromCache: boolean
-}
-
 interface AiPayload {
   system: string
   userText: string
-  pdfBase64?: string
+  pdfs?: string[]
 }
 
 async function callAi(payload: AiPayload): Promise<{ text: string; provider: string; model: string }> {
@@ -72,7 +91,7 @@ async function callAi(payload: AiPayload): Promise<{ text: string; provider: str
 }
 
 // ---------- Bộ nhớ đệm: cùng một đề tải lại không tốn lượt AI ----------
-const CACHE_PREFIX = 'ganid6-cache-v1:'
+const CACHE_PREFIX = 'ganid6-cache-v2:'
 const CACHE_MAX = 40
 
 async function sha256(input: string | ArrayBuffer): Promise<string> {
@@ -81,18 +100,20 @@ async function sha256(input: string | ArrayBuffer): Promise<string> {
   return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('')
 }
 
-function cacheGet(key: string): ClassifiedItem[] | null {
+type CacheValue = { items: ClassifiedItem[]; declared: DeclaredCounts; mode: 'pdf' | 'text' }
+
+function cacheGet(key: string): CacheValue | null {
   try {
     const raw = localStorage.getItem(CACHE_PREFIX + key)
-    return raw ? (JSON.parse(raw).items as ClassifiedItem[]) : null
+    return raw ? (JSON.parse(raw) as CacheValue) : null
   } catch {
     return null
   }
 }
 
-function cacheSet(key: string, items: ClassifiedItem[]) {
+function cacheSet(key: string, v: CacheValue) {
   try {
-    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ t: Date.now(), items }))
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ t: Date.now(), ...v }))
     const keys = Object.keys(localStorage).filter((k) => k.startsWith(CACHE_PREFIX))
     if (keys.length > CACHE_MAX) {
       const sorted = keys
@@ -117,19 +138,28 @@ function parseJsonLoose(text: string): unknown {
   }
 }
 
-function normalizeItems(raw: unknown): ClassifiedItem[] {
-  const items = (raw as { items?: unknown[] })?.items
-  if (!Array.isArray(items)) throw new Error('AI trả về dữ liệu không đúng cấu trúc. Hãy thử lại.')
-  const out: ClassifiedItem[] = []
-  for (const it of items as Record<string, unknown>[]) {
+function normalize(raw: unknown): { items: ClassifiedItem[]; declared: DeclaredCounts } {
+  const obj = raw as { items?: unknown[]; declared?: Record<string, unknown> }
+  if (!Array.isArray(obj?.items)) throw new Error('AI trả về dữ liệu không đúng cấu trúc. Hãy thử lại.')
+  const declared: DeclaredCounts = {}
+  for (const p of [1, 2, 3] as PartNo[]) {
+    const n = Number(obj.declared?.[String(p)])
+    if (Number.isInteger(n) && n > 0 && n <= 60) declared[p] = n
+  }
+  const seen = new Set<string>()
+  const items: ClassifiedItem[] = []
+  for (const it of obj.items as Record<string, unknown>[]) {
     const part = Number(it.part) as PartNo
     const num = Number(it.num)
     if (![1, 2, 3].includes(part) || !Number.isInteger(num) || num < 1) continue
+    const k = `${part}-${num}`
+    if (seen.has(k)) continue // AI lặp câu → giữ lần đầu
+    seen.add(k)
     const rawCode = String(it.code ?? '')
     const code = toDangCode(rawCode)
     const lvl = String(it.level ?? '').toUpperCase() as Level
     const valid = !!code && isValidDang(code)
-    out.push({
+    items.push({
       part,
       num,
       dangCode: valid ? code! : '',
@@ -137,69 +167,11 @@ function normalizeItems(raw: unknown): ClassifiedItem[] {
       note: String(it.note ?? ''),
       invalidCode: valid ? undefined : rawCode || '(trống)',
       mdTag: [1, 2, 3, 4].includes(Number(it.md)) ? Number(it.md) : null,
+      start: typeof it.start === 'string' ? it.start.slice(0, 200) : undefined,
     })
   }
-  return out
-}
-
-/**
- * Gán ID cho các câu đã tách được từ văn bản PDF.
- * Gửi CẢ ĐỀ trong 1 lần gọi (tiết kiệm lượt AI); đề dài trên 30 câu mới chia nhóm.
- * Kết quả được lưu đệm theo nội dung đề: tải lại cùng đề không gọi AI nữa.
- */
-export async function classifyQuestions(
-  questions: SplitQuestion[],
-  opts: { force?: boolean } = {}
-): Promise<{ items: ClassifiedItem[]; meta: AiMeta }> {
-  const key = await sha256(questions.map((q) => `${q.part}|${q.num}|${q.text}`).join('\n'))
-  if (!opts.force) {
-    const cached = cacheGet(key)
-    if (cached) return { items: cached, meta: { provider: '', model: '', fromCache: true } }
-  }
-  const sys = systemPrompt()
-  const groups: SplitQuestion[][] = []
-  for (let i = 0; i < questions.length; i += 30) groups.push(questions.slice(i, i + 30))
-  let meta: AiMeta = { provider: '', model: '', fromCache: false }
-  const items: ClassifiedItem[] = []
-  for (const qs of groups) {
-    const userText =
-      `Gán mã dạng ID6 và mức độ cho ${qs.length} câu sau. ` +
-      `part 1 = ${PART_NAMES[1]}; part 2 = ${PART_NAMES[2]}; part 3 = ${PART_NAMES[3]}. ` +
-      `Văn bản được rút từ PDF nên công thức có thể bị vỡ, hãy suy luận theo ngữ cảnh. ` +
-      `Trả về đủ ${qs.length} phần tử trong "items".\n\n` +
-      qs.map((q) => `=== part=${q.part} num=${q.num} ===\n${q.text}`).join('\n\n')
-    const r = await callAi({ system: sys, userText })
-    meta = { provider: r.provider, model: r.model, fromCache: false }
-    items.push(...normalizeItems(parseJsonLoose(r.text)))
-  }
-  cacheSet(key, items)
-  return { items, meta }
-}
-
-/** Trường hợp PDF scan (không rút được chữ): gửi nguyên file PDF để AI tự đọc, tách câu và gán ID. */
-export async function classifyPdfDirect(
-  file: File,
-  opts: { force?: boolean } = {}
-): Promise<{ items: ClassifiedItem[]; meta: AiMeta }> {
-  if (file.size > 3.2 * 1024 * 1024)
-    throw new Error('File PDF scan lớn hơn 3,2 MB nên không gửi được cho AI. Hãy nén file hoặc dùng PDF có lớp chữ.')
-  const key = 'pdf-' + (await sha256(await file.arrayBuffer()))
-  if (!opts.force) {
-    const cached = cacheGet(key)
-    if (cached) return { items: cached, meta: { provider: '', model: '', fromCache: true } }
-  }
-  const pdfBase64 = await fileToBase64(file)
-  const r = await callAi({
-    system: systemPrompt(),
-    pdfBase64,
-    userText:
-      'File PDF đính kèm là đề thi (có thể kèm lời giải). Hãy tự xác định từng câu hỏi theo 3 phần ' +
-      '(part 1: nhiều phương án, part 2: đúng/sai, part 3: trả lời ngắn; số câu đánh lại từ 1 ở mỗi phần), ' +
-      'rồi gán mã dạng ID6 và mức độ cho TẤT CẢ các câu. Nếu đề có nhãn mức độ như [MĐ1], [MĐ2]… thì ghi thêm trường "md" là số đó.',
-  })
-  const items = normalizeItems(parseJsonLoose(r.text))
-  cacheSet(key, items)
-  return { items, meta: { provider: r.provider, model: r.model, fromCache: false } }
+  items.sort((a, b) => a.part - b.part || a.num - b.num)
+  return { items, declared }
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -209,4 +181,63 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(file)
   })
+}
+
+/**
+ * Gán ID cho cả đề trong 1 lượt AI.
+ * Ưu tiên gửi NGUYÊN FILE PDF cho AI đọc (thấy đúng công thức, hình vẽ, bố cục 2 cột) — chính xác hơn
+ * nhiều so với chữ rút từ PDF (công thức MathType thường bị vỡ, câu bị dính/mất).
+ * Chỉ khi file quá lớn mới dùng chữ đã tách (textQuestions).
+ * Kết quả lưu đệm theo nội dung file: tải lại cùng đề không tốn lượt.
+ */
+export async function classifyExam(
+  files: File[],
+  textQuestions: SplitQuestion[],
+  opts: { force?: boolean } = {}
+): Promise<ClassifyResult> {
+  const totalBytes = files.reduce((s, f) => s + f.size, 0)
+  const usePdf = totalBytes <= MAX_PDF_BYTES
+  if (!usePdf && textQuestions.length === 0)
+    throw new Error('File PDF lớn hơn 3,2 MB và không rút được chữ. Hãy nén file PDF (vd ilovepdf.com) rồi thử lại.')
+
+  const hashes: string[] = []
+  for (const f of files) hashes.push(await sha256(await f.arrayBuffer()))
+  const key = `${usePdf ? 'pdf' : 'text'}-${await sha256(hashes.join('|'))}`
+  if (!opts.force) {
+    const c = cacheGet(key)
+    if (c) return { items: c.items, declared: c.declared, meta: { provider: '', model: '', fromCache: true, mode: c.mode } }
+  }
+
+  let r: { text: string; provider: string; model: string }
+  if (usePdf) {
+    const pdfs: string[] = []
+    for (const f of files) pdfs.push(await fileToBase64(f))
+    r = await callAi({
+      system: systemPrompt(),
+      pdfs,
+      userText:
+        (files.length > 1
+          ? `Có ${files.length} file PDF: file đầu là đề, các file sau là lời giải của CÙNG đề đó. `
+          : 'File PDF là đề thi (có thể kèm lời giải ở cuối). ') +
+        'Hãy xác định TẤT CẢ các câu hỏi của đề theo 3 phần ' +
+        `(part 1 = ${PART_NAMES[1]}; part 2 = ${PART_NAMES[2]}; part 3 = ${PART_NAMES[3]}), ` +
+        'không tính trùng phần lời giải lặp lại đề, rồi gán mã dạng ID6 và mức độ cho từng câu.',
+    })
+  } else {
+    r = await callAi({
+      system: systemPrompt(),
+      userText:
+        `Gán mã dạng ID6 và mức độ cho ${textQuestions.length} câu sau. ` +
+        `part 1 = ${PART_NAMES[1]}; part 2 = ${PART_NAMES[2]}; part 3 = ${PART_NAMES[3]}. ` +
+        `Văn bản được rút từ PDF nên công thức có thể bị vỡ, hãy suy luận theo ngữ cảnh. ` +
+        `Trả về đủ ${textQuestions.length} phần tử trong "items".\n\n` +
+        textQuestions.map((q) => `=== part=${q.part} num=${q.num} ===\n${q.text}`).join('\n\n'),
+    })
+  }
+
+  const { items, declared } = normalize(parseJsonLoose(r.text))
+  if (items.length === 0) throw new Error('AI không nhận ra câu hỏi nào trong file. Hãy kiểm tra lại file PDF.')
+  const mode = usePdf ? 'pdf' : 'text'
+  cacheSet(key, { items, declared, mode })
+  return { items, declared, meta: { provider: r.provider, model: r.model, fromCache: false, mode } }
 }

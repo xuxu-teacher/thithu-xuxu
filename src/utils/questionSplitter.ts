@@ -25,12 +25,14 @@ export interface SplitResult {
 
 const MAX_CHARS_PER_QUESTION = 2200
 
+// Chỉ bắt tiêu đề VIẾT HOA (vd "LỜI GIẢI CHI TIẾT"); không bắt dòng "Lời giải"/"Hướng dẫn giải" dưới từng câu
 const SOLUTION_HEADING =
-  /(L[ỜO]I\s+GI[ẢA]I\s+CHI\s+TI[ẾE]T|H[ƯU][ỚO]NG\s+D[ẪA]N\s+GI[ẢA]I|L[ỜO]I\s+GI[ẢA]I\s+THAM\s+KH[ẢA]O|ĐÁP\s+ÁN\s+VÀ\s+LỜI\s+GIẢI)/gi
+  /(L[ỜO]I\s+GI[ẢA]I\s+CHI\s+TI[ẾE]T|H[ƯU][ỚO]NG\s+D[ẪA]N\s+GI[ẢA]I\s+CHI\s+TI[ẾE]T|L[ỜO]I\s+GI[ẢA]I\s+THAM\s+KH[ẢA]O|ĐÁP\s+ÁN\s+VÀ\s+LỜI\s+GIẢI)/g
 
 const PART_HEADING = /^\s*PH[ẦA]N\s+(III|II|I|3|2|1)\b/i
-// "Câu 1." / "Câu 1:" / "Câu 5 [MĐ3]" — nhưng không bắt dòng bảng đáp án "Câu 1 2 3 4"
-const QUESTION_START = /^\s*C[âa]u\s+(\d{1,2})\s*(?:[.:]|(?=\s*[^\d\s]))/i
+// "Câu 1." / "Câu 1:" / "Câu 5 [MĐ3]" — phân biệt hoa thường và bắt buộc có dấu . : hoặc nhãn [ ngay sau số,
+// để KHÔNG bắt các dòng bảng đáp án như "Câu 1 2 3 4" hay "CÂU 1 CÂU 2 CÂU 3 CÂU 4"
+const QUESTION_START = /^\s*Câu\s+(\d{1,2})\s*(?:[.:]|(?=\[))/
 const MD_TAG = /[[(]\s*M[ĐD]\s*([1-4])\s*[\])]/i
 
 function romanToPart(s: string): PartNo {

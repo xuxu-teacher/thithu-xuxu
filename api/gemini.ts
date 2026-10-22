@@ -12,7 +12,7 @@
  *   CLAUDE_MODEL        – tuỳ chọn, mặc định claude-haiku-4-5-20251001
  *   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY – đã có sẵn của dự án
  *
- * Body nhận vào: { system: string, userText: string, pdfBase64?: string }
+ * Body nhận vào: { system: string, userText: string, pdfs?: string[] (base64) }
  * Trả về: { text, provider, model }
  */
 
@@ -30,7 +30,7 @@ type Res = { status: (code: number) => Res; json: (data: any) => void; setHeader
 interface Payload {
   system: string
   userText: string
-  pdfBase64?: string
+  pdfs: string[]
 }
 
 interface Attempt {
@@ -50,7 +50,7 @@ async function verifyTeacher(authHeader: string | undefined): Promise<boolean> {
 
 async function callGemini(model: string, apiKey: string, p: Payload): Promise<Attempt> {
   const parts: unknown[] = []
-  if (p.pdfBase64) parts.push({ inline_data: { mime_type: 'application/pdf', data: p.pdfBase64 } })
+  for (const d of p.pdfs) parts.push({ inline_data: { mime_type: 'application/pdf', data: d } })
   parts.push({ text: p.userText })
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
@@ -74,8 +74,8 @@ async function callGemini(model: string, apiKey: string, p: Payload): Promise<At
 
 async function callClaude(model: string, apiKey: string, p: Payload): Promise<Attempt> {
   const content: unknown[] = []
-  if (p.pdfBase64)
-    content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: p.pdfBase64 } })
+  for (const d of p.pdfs)
+    content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d } })
   content.push({ type: 'text', text: p.userText + '\n\nChỉ trả về JSON, không giải thích, không markdown.' })
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -111,7 +111,12 @@ export default async function handler(req: Req, res: Res) {
     return res.status(401).json({ error: 'Cần đăng nhập tài khoản giáo viên.' })
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
-  const p: Payload = { system: String(body?.system || ''), userText: String(body?.userText || ''), pdfBase64: body?.pdfBase64 }
+  const pdfs: string[] = Array.isArray(body?.pdfs)
+    ? body.pdfs.filter((x: unknown) => typeof x === 'string' && x.length > 0)
+    : typeof body?.pdfBase64 === 'string'
+      ? [body.pdfBase64]
+      : []
+  const p: Payload = { system: String(body?.system || ''), userText: String(body?.userText || ''), pdfs }
   if (!p.system || !p.userText) return res.status(400).json({ error: 'Yêu cầu không hợp lệ.' })
 
   const geminiKey = env.GEMINI_API_KEY
