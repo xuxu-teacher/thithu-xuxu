@@ -45,18 +45,64 @@ BẢNG CHIA DẠNG ID6
 ${taxonomyPromptText()}`
 }
 
-async function callGemini(body: unknown): Promise<string> {
+export interface AiMeta {
+  provider: string
+  model: string
+  fromCache: boolean
+}
+
+interface AiPayload {
+  system: string
+  userText: string
+  pdfBase64?: string
+}
+
+async function callAi(payload: AiPayload): Promise<{ text: string; provider: string; model: string }> {
   const { data } = await supabase.auth.getSession()
   const token = data.session?.access_token
   if (!token) throw new Error('Phiên đăng nhập giáo viên đã hết hạn. Hãy đăng nhập lại.')
   const res = await fetch('/api/gemini', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
   const json = await res.json().catch(() => null)
   if (!res.ok) throw new Error(json?.error || `Máy chủ AI báo lỗi (${res.status}).`)
-  return (json?.text as string) || ''
+  return { text: (json?.text as string) || '', provider: json?.provider || '', model: json?.model || '' }
+}
+
+// ---------- Bộ nhớ đệm: cùng một đề tải lại không tốn lượt AI ----------
+const CACHE_PREFIX = 'ganid6-cache-v1:'
+const CACHE_MAX = 40
+
+async function sha256(input: string | ArrayBuffer): Promise<string> {
+  const buf = typeof input === 'string' ? new TextEncoder().encode(input) : input
+  const d = await crypto.subtle.digest('SHA-256', buf)
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+
+function cacheGet(key: string): ClassifiedItem[] | null {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + key)
+    return raw ? (JSON.parse(raw).items as ClassifiedItem[]) : null
+  } catch {
+    return null
+  }
+}
+
+function cacheSet(key: string, items: ClassifiedItem[]) {
+  try {
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ t: Date.now(), items }))
+    const keys = Object.keys(localStorage).filter((k) => k.startsWith(CACHE_PREFIX))
+    if (keys.length > CACHE_MAX) {
+      const sorted = keys
+        .map((k) => ({ k, t: JSON.parse(localStorage.getItem(k) || '{}').t || 0 }))
+        .sort((a, b) => a.t - b.t)
+      sorted.slice(0, keys.length - CACHE_MAX).forEach((x) => localStorage.removeItem(x.k))
+    }
+  } catch {
+    /* bộ nhớ trình duyệt đầy hoặc bị chặn — bỏ qua */
+  }
 }
 
 function parseJsonLoose(text: string): unknown {
@@ -96,55 +142,64 @@ function normalizeItems(raw: unknown): ClassifiedItem[] {
   return out
 }
 
-/** Gán ID cho các câu đã tách được từ văn bản PDF. Gửi song song theo từng phần. */
-export async function classifyQuestions(questions: SplitQuestion[]): Promise<ClassifiedItem[]> {
+/**
+ * Gán ID cho các câu đã tách được từ văn bản PDF.
+ * Gửi CẢ ĐỀ trong 1 lần gọi (tiết kiệm lượt AI); đề dài trên 30 câu mới chia nhóm.
+ * Kết quả được lưu đệm theo nội dung đề: tải lại cùng đề không gọi AI nữa.
+ */
+export async function classifyQuestions(
+  questions: SplitQuestion[],
+  opts: { force?: boolean } = {}
+): Promise<{ items: ClassifiedItem[]; meta: AiMeta }> {
+  const key = await sha256(questions.map((q) => `${q.part}|${q.num}|${q.text}`).join('\n'))
+  if (!opts.force) {
+    const cached = cacheGet(key)
+    if (cached) return { items: cached, meta: { provider: '', model: '', fromCache: true } }
+  }
   const sys = systemPrompt()
   const groups: SplitQuestion[][] = []
-  for (const p of [1, 2, 3] as PartNo[]) {
-    const qs = questions.filter((q) => q.part === p)
-    for (let i = 0; i < qs.length; i += 12) groups.push(qs.slice(i, i + 12))
+  for (let i = 0; i < questions.length; i += 30) groups.push(questions.slice(i, i + 30))
+  let meta: AiMeta = { provider: '', model: '', fromCache: false }
+  const items: ClassifiedItem[] = []
+  for (const qs of groups) {
+    const userText =
+      `Gán mã dạng ID6 và mức độ cho ${qs.length} câu sau. ` +
+      `part 1 = ${PART_NAMES[1]}; part 2 = ${PART_NAMES[2]}; part 3 = ${PART_NAMES[3]}. ` +
+      `Văn bản được rút từ PDF nên công thức có thể bị vỡ, hãy suy luận theo ngữ cảnh. ` +
+      `Trả về đủ ${qs.length} phần tử trong "items".\n\n` +
+      qs.map((q) => `=== part=${q.part} num=${q.num} ===\n${q.text}`).join('\n\n')
+    const r = await callAi({ system: sys, userText })
+    meta = { provider: r.provider, model: r.model, fromCache: false }
+    items.push(...normalizeItems(parseJsonLoose(r.text)))
   }
-  const results = await Promise.all(
-    groups.map(async (qs) => {
-      const userText =
-        `Gán mã dạng ID6 và mức độ cho ${qs.length} câu sau (${PART_NAMES[qs[0].part]}). ` +
-        `Văn bản được rút từ PDF nên công thức có thể bị vỡ, hãy suy luận theo ngữ cảnh.\n\n` +
-        qs.map((q) => `=== part=${q.part} num=${q.num} ===\n${q.text}`).join('\n\n')
-      const text = await callGemini({
-        systemInstruction: { parts: [{ text: sys }] },
-        contents: [{ role: 'user', parts: [{ text: userText }] }],
-        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-      })
-      return normalizeItems(parseJsonLoose(text))
-    })
-  )
-  return results.flat()
+  cacheSet(key, items)
+  return { items, meta }
 }
 
 /** Trường hợp PDF scan (không rút được chữ): gửi nguyên file PDF để AI tự đọc, tách câu và gán ID. */
-export async function classifyPdfDirect(file: File): Promise<ClassifiedItem[]> {
+export async function classifyPdfDirect(
+  file: File,
+  opts: { force?: boolean } = {}
+): Promise<{ items: ClassifiedItem[]; meta: AiMeta }> {
   if (file.size > 3.2 * 1024 * 1024)
     throw new Error('File PDF scan lớn hơn 3,2 MB nên không gửi được cho AI. Hãy nén file hoặc dùng PDF có lớp chữ.')
-  const base64 = await fileToBase64(file)
-  const text = await callGemini({
-    systemInstruction: { parts: [{ text: systemPrompt() }] },
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { inline_data: { mime_type: 'application/pdf', data: base64 } },
-          {
-            text:
-              'File PDF trên là đề thi (có thể kèm lời giải). Hãy tự xác định từng câu hỏi theo 3 phần ' +
-              '(part 1: nhiều phương án, part 2: đúng/sai, part 3: trả lời ngắn; số câu đánh lại từ 1 ở mỗi phần), ' +
-              'rồi gán mã dạng ID6 và mức độ cho TẤT CẢ các câu. Nếu đề có nhãn mức độ như [MĐ1], [MĐ2]… thì ghi thêm trường "md" là số đó.',
-          },
-        ],
-      },
-    ],
-    generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+  const key = 'pdf-' + (await sha256(await file.arrayBuffer()))
+  if (!opts.force) {
+    const cached = cacheGet(key)
+    if (cached) return { items: cached, meta: { provider: '', model: '', fromCache: true } }
+  }
+  const pdfBase64 = await fileToBase64(file)
+  const r = await callAi({
+    system: systemPrompt(),
+    pdfBase64,
+    userText:
+      'File PDF đính kèm là đề thi (có thể kèm lời giải). Hãy tự xác định từng câu hỏi theo 3 phần ' +
+      '(part 1: nhiều phương án, part 2: đúng/sai, part 3: trả lời ngắn; số câu đánh lại từ 1 ở mỗi phần), ' +
+      'rồi gán mã dạng ID6 và mức độ cho TẤT CẢ các câu. Nếu đề có nhãn mức độ như [MĐ1], [MĐ2]… thì ghi thêm trường "md" là số đó.',
   })
-  return normalizeItems(parseJsonLoose(text))
+  const items = normalizeItems(parseJsonLoose(r.text))
+  cacheSet(key, items)
+  return { items, meta: { provider: r.provider, model: r.model, fromCache: false } }
 }
 
 function fileToBase64(file: File): Promise<string> {

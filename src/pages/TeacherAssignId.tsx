@@ -1,7 +1,7 @@
 import { ChangeEvent, useMemo, useState } from 'react'
 import { extractPdfText } from '../utils/pdfText'
 import { PartNo, SplitQuestion, splitQuestions } from '../utils/questionSplitter'
-import { ClassifiedItem, classifyPdfDirect, classifyQuestions } from '../utils/aiClassify'
+import { AiMeta, ClassifiedItem, classifyPdfDirect, classifyQuestions } from '../utils/aiClassify'
 import {
   Level,
   LEVELS,
@@ -25,6 +25,13 @@ interface Row {
   level: Level
   aiNote: string
   aiInvalid?: string
+}
+
+function metaNotice(meta: AiMeta): string {
+  if (meta.fromCache) return 'Đề này đã gán trước đó — dùng lại kết quả đã lưu, không tốn lượt AI. Bấm "Gán lại bằng AI" nếu muốn chạy lại.'
+  return meta.provider === 'claude'
+    ? `AI dùng: ${meta.model} (dự phòng trả phí, vì Gemini miễn phí đã hết lượt hôm nay).`
+    : `AI dùng: ${meta.model} (miễn phí).`
 }
 
 const DEFAULT_MD_MAP: Record<number, Level> = { 1: 'N', 2: 'H', 3: 'V', 4: 'C' }
@@ -63,7 +70,7 @@ export default function TeacherAssignId() {
     return mdTag && mdMap[mdTag] ? mdMap[mdTag] : aiLevel
   }
 
-  async function handleAssign() {
+  async function handleAssign(force = false) {
     if (files.length === 0) return
     setBusy(true)
     setError(null)
@@ -85,7 +92,8 @@ export default function TeacherAssignId() {
       if (isScanned) {
         msgs.push('PDF gần như không có lớp chữ (file scan) — đã gửi nguyên file cho AI tự đọc. Hãy rà kỹ số câu và ID.')
         setStatus('Đang gửi file PDF cho AI đọc và gán ID… (có thể mất 30–60 giây)')
-        const items = await classifyPdfDirect(files[0])
+        const { items, meta } = await classifyPdfDirect(files[0], { force })
+        msgs.push(metaNotice(meta))
         result = items
           .sort((a, b) => a.part - b.part || a.num - b.num)
           .map((it) => toRow(it, it.mdTag ?? null, '', it.mdTag ?? null))
@@ -95,7 +103,8 @@ export default function TeacherAssignId() {
         const counts = ([1, 2, 3] as PartNo[]).map((p) => split.questions.filter((q) => q.part === p).length)
         msgs.push(`Tách được ${split.questions.length} câu: Phần I ${counts[0]}, Phần II ${counts[1]}, Phần III ${counts[2]}.`)
         setStatus(`Đang gửi ${split.questions.length} câu cho AI gán ID…`)
-        const items = await classifyQuestions(split.questions)
+        const { items, meta } = await classifyQuestions(split.questions, { force })
+        msgs.push(metaNotice(meta))
         const byKey = new Map(items.map((it) => [`${it.part}-${it.num}`, it]))
         result = split.questions.map((q: SplitQuestion) => {
           const it = byKey.get(`${q.part}-${q.num}`)
@@ -238,9 +247,21 @@ export default function TeacherAssignId() {
           Câu có nhãn [MĐ…] trong đề lấy mức độ theo bảng quy đổi trên; câu không có nhãn do AI đánh giá.
         </p>
 
-        <button className="btn" onClick={handleAssign} disabled={busy || files.length === 0}>
-          {busy ? 'Đang xử lý…' : 'Gán ID'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn" onClick={() => handleAssign(false)} disabled={busy || files.length === 0}>
+            {busy ? 'Đang xử lý…' : 'Gán ID'}
+          </button>
+          {rows.length > 0 && (
+            <button
+              className="btn secondary"
+              onClick={() => handleAssign(true)}
+              disabled={busy}
+              title="Bỏ qua kết quả đã lưu, gọi AI gán lại (tốn 1 lượt AI)"
+            >
+              Gán lại bằng AI
+            </button>
+          )}
+        </div>
         {status && <p style={{ marginTop: 12 }}>{status}</p>}
         {error && <p style={{ color: 'var(--danger)', marginTop: 12 }}>{error}</p>}
         {notices.map((n, i) => (
